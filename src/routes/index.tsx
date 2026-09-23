@@ -42,6 +42,36 @@ export const Route = createFileRoute("/")({
 
 type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | "profile";
 
+type EmployeeProfileData = {
+  initials: string;
+  name: string;
+  role: string;
+  department: string;
+  status: string;
+  timezone: string;
+  email: string;
+  phone: string;
+  location: string;
+  manager: string;
+  joinedAt: string;
+  accessLevel: string;
+};
+
+const EMPLOYEE_PROFILE: EmployeeProfileData = {
+  initials: "ЕС",
+  name: "Елена Соколова",
+  role: "Старший специалист поддержки",
+  department: "Клиентский сервис",
+  status: "На связи",
+  timezone: "Москва · UTC+3",
+  email: "e.sokolova@nexa.team",
+  phone: "+7 495 120-48-12 · 214",
+  location: "Москва, офис Центр",
+  manager: "Дмитрий Морозов",
+  joinedAt: "С 14 марта 2022",
+  accessLevel: "Специалист L2",
+};
+
 const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "overview", label: "Обзор" },
   { id: "tickets", label: "Заявки" },
@@ -134,7 +164,9 @@ function NexaPrototype() {
               <button
                 key={s.id}
                 data-screen={s.id}
+                 type="button"
                 onClick={() => setActive(s.id)}
+                 aria-current={active === s.id ? "page" : undefined}
                 className={`relative z-10 rounded-md px-2.5 py-2 text-sm transition-colors duration-200 active:scale-[0.97] xl:px-3.5 ${
                   active === s.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -174,7 +206,7 @@ function NexaPrototype() {
         {active === "clients" && <Clients />}
         {active === "knowledge" && <Knowledge />}
         {active === "settings" && <Settings />}
-        {active === "profile" && <EmployeeProfile />}
+        {active === "profile" && <EmployeeProfile employee={EMPLOYEE_PROFILE} />}
       </main>
 
       <footer className="border-t border-border">
@@ -406,10 +438,11 @@ const PROFILE_TASKS = [
   },
 ];
 
-function EmployeeProfile() {
+function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
   const [contactCopied, setContactCopied] = useState(false);
 
-  const copyContact = () => {
+  const copyContact = async () => {
+    await navigator.clipboard?.writeText(employee.email);
     setContactCopied(true);
     window.setTimeout(() => setContactCopied(false), 1400);
   };
@@ -421,20 +454,20 @@ function EmployeeProfile() {
           <div className="flex min-w-0 items-center gap-5">
             <Avatar className="h-20 w-20 rounded-lg border border-border bg-secondary shadow-sm sm:h-24 sm:w-24">
               <AvatarFallback className="rounded-lg bg-secondary text-2xl font-semibold text-primary">
-                ЕС
+                {employee.initials}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  На связи
+                  {employee.status}
                 </span>
-                <span className="text-xs text-muted-foreground">Москва · UTC+3</span>
+                <span className="text-xs text-muted-foreground">{employee.timezone}</span>
               </div>
-              <h1 className="text-2xl font-semibold sm:text-3xl">Елена Соколова</h1>
+              <h1 className="text-2xl font-semibold sm:text-3xl">{employee.name}</h1>
               <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
-                Старший специалист поддержки · Клиентский сервис
+                {employee.role} · {employee.department}
               </p>
             </div>
           </div>
@@ -533,9 +566,9 @@ function EmployeeProfile() {
             <h2 className="mb-3 text-sm font-medium">Контакты</h2>
             <div className="space-y-1 rounded-lg border border-border bg-card p-3">
               {[
-                { icon: Mail, label: "Почта", value: "e.sokolova@nexa.team" },
-                { icon: Phone, label: "Телефон", value: "+7 495 120-48-12 · 214" },
-                { icon: MapPin, label: "Локация", value: "Москва, офис Центр" },
+                { icon: Mail, label: "Почта", value: employee.email },
+                { icon: Phone, label: "Телефон", value: employee.phone },
+                { icon: MapPin, label: "Локация", value: employee.location },
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex gap-3 rounded-md p-2 transition-colors hover:bg-secondary/45">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -552,11 +585,11 @@ function EmployeeProfile() {
             <h2 className="mb-3 text-sm font-medium">Рабочая информация</h2>
             <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
               {[
-                { icon: BriefcaseBusiness, label: "Должность", value: "Старший специалист" },
-                { icon: Building2, label: "Отдел", value: "Клиентский сервис" },
-                { icon: UserRound, label: "Руководитель", value: "Дмитрий Морозов" },
-                { icon: CalendarDays, label: "В команде", value: "С 14 марта 2022" },
-                { icon: ShieldCheck, label: "Уровень доступа", value: "Специалист L2" },
+                { icon: BriefcaseBusiness, label: "Должность", value: employee.role },
+                { icon: Building2, label: "Отдел", value: employee.department },
+                { icon: UserRound, label: "Руководитель", value: employee.manager },
+                { icon: CalendarDays, label: "В команде", value: employee.joinedAt },
+                { icon: ShieldCheck, label: "Уровень доступа", value: employee.accessLevel },
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex gap-3 py-3.5">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
