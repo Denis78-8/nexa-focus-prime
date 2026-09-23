@@ -1,5 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useLayoutEffect, useRef, useState } from "react";
+import {
+  AtSign,
+  BriefcaseBusiness,
+  Building2,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Mail,
+  MapPin,
+  MessageSquare,
+  Phone,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -23,7 +40,7 @@ export const Route = createFileRoute("/")({
   component: NexaPrototype,
 });
 
-type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings";
+type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | "profile";
 
 const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "overview", label: "Обзор" },
@@ -31,6 +48,7 @@ const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "clients", label: "Клиенты" },
   { id: "knowledge", label: "База знаний" },
   { id: "settings", label: "Настройки" },
+  { id: "profile", label: "Профиль" },
 ];
 
 const TICKETS = [
@@ -82,17 +100,24 @@ function NexaPrototype() {
   useLayoutEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-    const btn = nav.querySelector<HTMLButtonElement>(`[data-screen="${active}"]`);
-    if (btn) {
-      setIndicator({ left: btn.offsetLeft, width: btn.offsetWidth });
-    }
+    const updateIndicator = () => {
+      const btn = nav.querySelector<HTMLButtonElement>(`[data-screen="${active}"]`);
+      if (!btn) return;
+      const navRect = nav.getBoundingClientRect();
+      const buttonRect = btn.getBoundingClientRect();
+      setIndicator({ left: buttonRect.left - navRect.left, width: buttonRect.width });
+    };
+    updateIndicator();
+    const observer = new ResizeObserver(updateIndicator);
+    observer.observe(nav);
+    return () => observer.disconnect();
   }, [active]);
 
   return (
     <div className="dark min-h-screen bg-background text-foreground">
       {/* Top bar */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-8 px-6 py-3">
+        <div className="mx-auto flex max-w-6xl items-center gap-5 px-6 py-3 xl:gap-8">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
               N
@@ -104,13 +129,13 @@ function NexaPrototype() {
           </div>
 
           {/* Nav with sliding indicator */}
-          <nav ref={navRef} className="relative flex items-center gap-1">
+          <nav ref={navRef} className="relative flex min-w-0 items-center gap-0.5 xl:gap-1">
             {SCREENS.map((s) => (
               <button
                 key={s.id}
                 data-screen={s.id}
                 onClick={() => setActive(s.id)}
-                className={`relative z-10 rounded-md px-3.5 py-2 text-sm transition-colors ${
+                className={`relative z-10 rounded-md px-2.5 py-2 text-sm transition-colors duration-200 active:scale-[0.97] xl:px-3.5 ${
                   active === s.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -125,15 +150,20 @@ function NexaPrototype() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
-            <button className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <button className="hidden rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground lg:block">
               Поиск
             </button>
             <button className="rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90">
               + Заявка
             </button>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-              ДМ
-            </div>
+            <button
+              type="button"
+              aria-label="Открыть профиль сотрудника"
+              onClick={() => setActive("profile")}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold transition-all duration-200 hover:bg-primary hover:text-primary-foreground active:scale-95"
+            >
+              ЕС
+            </button>
           </div>
         </div>
       </header>
@@ -144,6 +174,7 @@ function NexaPrototype() {
         {active === "clients" && <Clients />}
         {active === "knowledge" && <Knowledge />}
         {active === "settings" && <Settings />}
+        {active === "profile" && <EmployeeProfile />}
       </main>
 
       <footer className="border-t border-border">
@@ -346,6 +377,198 @@ function Settings() {
             </button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+const PROFILE_TASKS = [
+  {
+    id: "NX-1042",
+    title: "Проверить синхронизацию почтового ящика",
+    meta: "ООО «Вектор» · высокий приоритет",
+    time: "Сегодня, 14:30",
+    state: "В работе",
+  },
+  {
+    id: "NX-1031",
+    title: "Подготовить отчёт по скорости портала",
+    meta: "АО «Меридиан» · высокий приоритет",
+    time: "Сегодня, 17:00",
+    state: "На проверке",
+  },
+  {
+    id: "NX-1026",
+    title: "Обновить инструкцию по SLA",
+    meta: "Внутренняя задача · средний приоритет",
+    time: "Завтра, 11:00",
+    state: "Запланировано",
+  },
+];
+
+function EmployeeProfile() {
+  const [contactCopied, setContactCopied] = useState(false);
+
+  const copyContact = () => {
+    setContactCopied(true);
+    window.setTimeout(() => setContactCopied(false), 1400);
+  };
+
+  return (
+    <div className="animate-fade-in">
+      <section className="border-b border-border pb-7">
+        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+          <div className="flex min-w-0 items-center gap-5">
+            <Avatar className="h-20 w-20 rounded-lg border border-border bg-secondary shadow-sm sm:h-24 sm:w-24">
+              <AvatarFallback className="rounded-lg bg-secondary text-2xl font-semibold text-primary">
+                ЕС
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  На связи
+                </span>
+                <span className="text-xs text-muted-foreground">Москва · UTC+3</span>
+              </div>
+              <h1 className="text-2xl font-semibold sm:text-3xl">Елена Соколова</h1>
+              <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
+                Старший специалист поддержки · Клиентский сервис
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" onClick={copyContact} className="active:scale-[0.98]">
+              {contactCopied ? <Check /> : <AtSign />}
+              {contactCopied ? "Контакт скопирован" : "Скопировать контакт"}
+            </Button>
+            <Button className="active:scale-[0.98]">
+              <MessageSquare />
+              Написать
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="min-w-0 space-y-6">
+          <section>
+            <h2 className="mb-3 text-sm font-medium">Рабочие показатели</h2>
+            <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-card xl:grid-cols-4">
+              {[
+                { value: "18", label: "Активных задач", note: "3 с высоким приоритетом" },
+                { value: "47", label: "Решено за месяц", note: "+8 к прошлому месяцу" },
+                { value: "6 мин", label: "Средний ответ", note: "Лучше цели на 2 мин" },
+                { value: "4.9", label: "Оценка клиентов", note: "96% положительных" },
+              ].map((item, index) => (
+                <div
+                  key={item.label}
+                  className={`p-4 transition-colors duration-200 hover:bg-secondary/40 ${
+                    index % 2 ? "border-l border-border" : ""
+                  } ${index > 1 ? "border-t border-border xl:border-t-0" : ""} ${
+                    index > 0 ? "xl:border-l xl:border-border" : ""
+                  }`}
+                >
+                  <div className="text-2xl font-semibold">{item.value}</div>
+                  <div className="mt-1 text-xs font-medium">{item.label}</div>
+                  <div className="mt-2 text-[11px] text-muted-foreground">{item.note}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-medium">Текущая активность</h2>
+              <span className="text-xs text-muted-foreground">Обновлено 5 минут назад</span>
+            </div>
+            <div className="overflow-hidden rounded-lg border border-border bg-card">
+              {PROFILE_TASKS.map((task, index) => (
+                <button
+                  key={task.id}
+                  type="button"
+                  className={`group flex w-full items-center gap-4 px-4 py-4 text-left transition-all duration-200 hover:bg-secondary/45 active:bg-secondary/70 ${
+                    index ? "border-t border-border" : ""
+                  }`}
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
+                    {index === 0 ? <Clock3 className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <span className="font-mono text-[11px] text-primary">{task.id}</span>
+                      <span className="text-sm font-medium">{task.title}</span>
+                    </div>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{task.meta}</p>
+                  </div>
+                  <div className="hidden shrink-0 text-right sm:block">
+                    <div className="text-xs">{task.state}</div>
+                    <div className="mt-1 text-[11px] text-muted-foreground">{task.time}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-sm font-medium">Рабочая нагрузка</h2>
+            <div className="rounded-lg border border-border bg-card p-5">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <div className="text-2xl font-semibold">72%</div>
+                  <p className="mt-1 text-xs text-muted-foreground">18 из 25 задач в активном лимите</p>
+                </div>
+                <span className="text-xs font-medium text-primary">Оптимальная</span>
+              </div>
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-secondary">
+                <div className="h-full w-[72%] rounded-full bg-primary transition-[width] duration-500" />
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-6">
+          <section>
+            <h2 className="mb-3 text-sm font-medium">Контакты</h2>
+            <div className="space-y-1 rounded-lg border border-border bg-card p-3">
+              {[
+                { icon: Mail, label: "Почта", value: "e.sokolova@nexa.team" },
+                { icon: Phone, label: "Телефон", value: "+7 495 120-48-12 · 214" },
+                { icon: MapPin, label: "Локация", value: "Москва, офис Центр" },
+              ].map(({ icon: Icon, label, value }) => (
+                <div key={label} className="flex gap-3 rounded-md p-2 transition-colors hover:bg-secondary/45">
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 break-words text-xs">{value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-3 text-sm font-medium">Рабочая информация</h2>
+            <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
+              {[
+                { icon: BriefcaseBusiness, label: "Должность", value: "Старший специалист" },
+                { icon: Building2, label: "Отдел", value: "Клиентский сервис" },
+                { icon: UserRound, label: "Руководитель", value: "Дмитрий Морозов" },
+                { icon: CalendarDays, label: "В команде", value: "С 14 марта 2022" },
+                { icon: ShieldCheck, label: "Уровень доступа", value: "Специалист L2" },
+              ].map(({ icon: Icon, label, value }) => (
+                <div key={label} className="flex gap-3 py-3.5">
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div>
+                    <div className="text-[11px] text-muted-foreground">{label}</div>
+                    <div className="mt-0.5 text-xs font-medium">{value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
