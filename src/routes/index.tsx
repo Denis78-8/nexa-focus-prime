@@ -100,10 +100,17 @@ function NexaPrototype() {
   useLayoutEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
-    const btn = nav.querySelector<HTMLButtonElement>(`[data-screen="${active}"]`);
-    if (btn) {
-      setIndicator({ left: btn.offsetLeft, width: btn.offsetWidth });
-    }
+    const updateIndicator = () => {
+      const btn = nav.querySelector<HTMLButtonElement>(`[data-screen="${active}"]`);
+      if (!btn) return;
+      const navRect = nav.getBoundingClientRect();
+      const buttonRect = btn.getBoundingClientRect();
+      setIndicator({ left: buttonRect.left - navRect.left, width: buttonRect.width });
+    };
+    updateIndicator();
+    const observer = new ResizeObserver(updateIndicator);
+    observer.observe(nav);
+    return () => observer.disconnect();
   }, [active]);
 
   return (
