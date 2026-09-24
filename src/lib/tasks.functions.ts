@@ -168,3 +168,16 @@ export const addComment = createServerFn({ method: "POST" })
     fail(error);
     return c!;
   });
+
+export const addProjectMember = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { projectId: string; userId: string; role: "member" | "lead" }) =>
+    z.object({ projectId: z.string().uuid(), userId: z.string().uuid(), role: z.enum(["member", "lead"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase
+      .from("project_members")
+      .upsert({ project_id: data.projectId, user_id: data.userId, role: data.role });
+    fail(error);
+    return { ok: true };
+  });

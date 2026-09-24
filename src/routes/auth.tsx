@@ -35,7 +35,7 @@ function AuthPage() {
       if (mode === "signin") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        navigate({ to: "/", search: { screen: "tasks" } as never });
+        navigate({ to: "/" });
       } else {
         const { data, error } = await supabase.auth.signUp({
           email,
