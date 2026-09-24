@@ -1,14 +1,59 @@
-# Welcome to your Lovable project
+# Nexa Obsidian Flow
+
+Создай отдельный визуальный прототип интерфейса NEXA Helpdesk, НЕ копируя и НЕ изменяя основной локальный проект.
+
+Цель: полностью обновить визуальное направление NEXA в современный строгий orange/black стиль.
+
+Визуальная концепция:
+- основа интерфейса — почти чёрный графитовый фон, глубокие нейтральные поверхности;
+- главный акцент — насыщенный тёплый оранжевый;
+- белый использовать только для текста и контраста, без бело-синего общего "glass" эффекта;
+- современный premium macOS-inspired desktop UI, но более строгий и корпоративный;
+- много воздуха, аккуратная типографика, мягкие скругления, чёткое разделение карточек;
+- стекло использовать точечно и очень умеренно, без огромных backdrop-filter overlays;
+- сохранить ощущение лёгкого живого интерфейса;
+- анимации должны быть плавными и заметными, но не резкими.
+
+Главное изменение навигации:
+- больше НЕ делать основные разделы как вертикальные переключатели слева;
+- основные разделы "Главная", "Задачи", "Проекты", "Сотрудники", "Отчёты", "Уведомления" разместить В ВЕРХНЕЙ части окна;
+- сделать их единым красивым верхним navigation/tab bar;
+- активная вкладка должна иметь оранжевый liquid/physical indicator;
+- при переключении индикатор должен мягко перемещаться между вкладками с ощущением физики, лёгкого растяжения и упругого возврата;
+- hover должен быть мягким;
+- click/press должен иметь небольшую tactile реакцию;
+- никаких мгновенных исчезающих анимаций;
+- индикатор не должен превращаться в квадрат, отдельный прямоугольный блок или ломать backdrop blur.
+
+Сделай демонстрационный экран NEXA:
+- верхняя панель с логотипом NEXA слева;
+- навигация вверху по центру;
+- профиль пользователя/системные действия справа;
+- ниже приветствие и краткая статистика;
+- блок "Мои задачи" с современными карточками;
+- карточки задач со статусом, исполнителем, сроком и приоритетом;
+- одна-две кнопки с оранжевым акцентом;
+- покажи состояние активной вкладки и несколько hover/pressed состояний.
+
+Особенно важно:
+- не делать весь интерфейс оранжевым;
+- оранжевый только как акцент;
+- не использовать кислотный orange;
+- не перегружать градиентами;
+- никаких визуальных квадратов вместо glass/tab-индикатора;
+- интерфейс должен выглядеть как готовый профессиональный desktop product, а не landing page.
+
+Сделай прототип интерактивным: навигация реально переключается между несколькими состояниями/экранами, а верхний индикатор физически следует за активной вкладкой.
 
 This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/5385dddf-5282-48df-8271-7c9cd7e8bd7a).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +65,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
