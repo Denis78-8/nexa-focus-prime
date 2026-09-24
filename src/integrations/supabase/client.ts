@@ -23,6 +23,26 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     }
 
     headers.set('apikey', supabaseKey);
+    const requestUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (requestUrl.includes('/auth/v1/token')) {
+      const safeUrl = new URL(requestUrl);
+      console.info('AUTH DEBUG: Supabase Auth fetch start', {
+        url: `${safeUrl.origin}${safeUrl.pathname}`,
+        method: init?.method ?? (input instanceof Request ? input.method : 'GET'),
+      });
+      return fetch(input, { ...init, headers })
+        .then((response) => {
+          console.info('AUTH DEBUG: Supabase Auth fetch response', { status: response.status });
+          return response;
+        })
+        .catch((error: unknown) => {
+          console.error('AUTH DEBUG: Supabase Auth fetch failed', {
+            name: error instanceof Error ? error.name : 'UnknownError',
+            message: error instanceof Error ? error.message : 'Unknown fetch error',
+          });
+          throw error;
+        });
+    }
     return fetch(input, { ...init, headers });
   };
 }
@@ -66,4 +86,3 @@ export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>,
     return Reflect.get(_supabase, prop, receiver);
   },
 });
-

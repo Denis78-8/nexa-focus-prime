@@ -33,6 +33,7 @@ export function brokeredPreviewStorage() {
 
   const request = (type: string, key: string, value?: string): Promise<{ ok: boolean; value?: string | null } | null> =>
     new Promise((resolve) => {
+      console.info('AUTH DEBUG: preview storage request start', { operation: type });
       const requestId = newId();
       let done = false;
       let timer: ReturnType<typeof setTimeout>;
@@ -41,6 +42,11 @@ export function brokeredPreviewStorage() {
         done = true;
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
+        console.info('AUTH DEBUG: preview storage request finished', {
+          operation: type,
+          received: r !== null,
+          ok: r?.ok ?? false,
+        });
         resolve(r);
       };
       const onMessage = (e: MessageEvent) => {
@@ -62,6 +68,7 @@ export function brokeredPreviewStorage() {
 
   return {
     getItem: async (key: string) => {
+      console.info('AUTH DEBUG: preview storage getItem start');
       let res = await request('lovable-preview-auth:get', key);
       if (!res && firstGet) {
         await new Promise((r) => setTimeout(r, RETRY_DELAY));
@@ -74,15 +81,26 @@ export function brokeredPreviewStorage() {
         if (res.value === '') { localStorage.removeItem(key); return null; }
         return res.value;
       }
-      return localStorage.getItem(key);
+      const localValue = localStorage.getItem(key);
+      console.info('AUTH DEBUG: preview storage getItem finished', {
+        source: res?.ok ? 'broker' : 'local',
+        found: typeof res?.value === 'string' || localValue !== null,
+      });
+      return localValue;
     },
     setItem: (key: string, value: string) => {
+      console.info('AUTH DEBUG: preview storage setItem start');
       localStorage.setItem(key, value);
-      return request('lovable-preview-auth:set', key, value).then(() => undefined);
+      return request('lovable-preview-auth:set', key, value).then(() => {
+        console.info('AUTH DEBUG: preview storage setItem finished');
+      });
     },
     removeItem: (key: string) => {
+      console.info('AUTH DEBUG: preview storage removeItem start');
       localStorage.removeItem(key);
-      return request('lovable-preview-auth:remove', key).then(() => undefined);
+      return request('lovable-preview-auth:remove', key).then(() => {
+        console.info('AUTH DEBUG: preview storage removeItem finished');
+      });
     },
   };
 }

@@ -8,10 +8,16 @@ export function useAuth() {
 
   useEffect(() => {
     const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    supabase.auth.getSession().then(({ data: d }) => {
-      setSession(d.session);
-      setLoading(false);
-    });
+    void supabase.auth.getSession()
+      .then(({ data: d, error }) => {
+        if (error) throw error;
+        setSession(d.session);
+      })
+      .catch((error: unknown) => {
+        console.error("[NEXA Auth] Не удалось восстановить сессию", error);
+        setSession(null);
+      })
+      .finally(() => setLoading(false));
     return () => data.subscription.unsubscribe();
   }, []);
 

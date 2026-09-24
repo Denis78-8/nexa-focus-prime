@@ -27,14 +27,27 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmationEmail, setConfirmationEmail] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    console.info("AUTH DEBUG: submit start");
     setBusy(true);
     try {
       if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        console.info("AUTH DEBUG: before signInWithPassword");
+        const result = await supabase.auth.signInWithPassword({ email, password });
+        console.info("AUTH DEBUG: after signInWithPassword", { error: Boolean(result.error) });
+        if (result.error) {
+          console.error("AUTH DEBUG: signIn error", {
+            name: result.error.name,
+            message: result.error.message,
+            status: result.error.status,
+            code: result.error.code,
+          });
+          throw result.error;
+        }
+        console.info("AUTH DEBUG: before redirect");
         navigate({ to: "/" });
       } else {
         const { data, error } = await supabase.auth.signUp({
@@ -44,11 +57,25 @@ function AuthPage() {
         });
         if (error) throw error;
         if (data.session) navigate({ to: "/" });
-        else toast.success("Проверьте почту и подтвердите адрес, затем войдите.");
+        else {
+          setConfirmationEmail(email);
+          setMode("signin");
+        }
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Ошибка входа");
+      const e = err as Error & { code?: string; status?: number };
+      const details = [
+        e.name === "AbortError"
+          ? "Сервер авторизации не ответил за 20 секунд. Проверьте соединение и повторите вход."
+          : e.message || "Ошибка входа",
+        e.code ? `code: ${e.code}` : "",
+        e.status ? `status: ${e.status}` : "",
+      ].filter(Boolean).join(" · ");
+
+      console.error("[NEXA Auth]", err);
+      toast.error(details);
     } finally {
+      console.info("AUTH DEBUG: submit finally");
       setBusy(false);
     }
   }
@@ -64,6 +91,11 @@ function AuthPage() {
           </div>
         </div>
         <form onSubmit={submit} className="space-y-4">
+          {confirmationEmail && (
+            <p role="status" className="rounded-md border border-primary/30 bg-primary/10 p-3 text-sm text-foreground">
+              Аккаунт создан. Подтвердите адрес по ссылке из письма на <strong>{confirmationEmail}</strong>, затем войдите.
+            </p>
+          )}
           {mode === "signup" && (
             <div className="space-y-1.5">
               <Label htmlFor="fn">ФИО</Label>

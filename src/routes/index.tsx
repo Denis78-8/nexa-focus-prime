@@ -1,22 +1,31 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useLayoutEffect, useRef, useState } from "react";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
+import type { Session } from "@supabase/supabase-js";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AtSign,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
   Check,
-  CheckCircle2,
-  Clock3,
   Mail,
+  LogOut,
   MapPin,
   MessageSquare,
   Phone,
   ShieldCheck,
-  UserRound,
 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { TaskWorkspace } from "@/components/nexa/TaskWorkspace";
+import { AdminPanel } from "@/components/nexa/AdminPanel";
+import { getAdminAccess } from "@/lib/admin.functions";
+import { getMyCorporateMailbox } from "@/lib/admin.functions";
+import { getCurrentProfile } from "@/lib/profile.functions";
+import { ensureProfile } from "@/lib/tasks.functions";
+import { useAuth } from "@/hooks/useAuth";
+import { useServerFn } from "@tanstack/react-start";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -44,33 +53,28 @@ type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | 
 
 type EmployeeProfileData = {
   initials: string;
-  name: string;
-  role: string;
-  department: string;
-  status: string;
-  timezone: string;
-  email: string;
-  phone: string;
-  location: string;
-  manager: string;
-  joinedAt: string;
-  accessLevel: string;
+  id: string;
+  full_name: string;
+  position: string | null;
+  department: string | null;
+  avatar_url: string | null;
+  presence: string;
+  created_at: string;
+  email: string | null;
+  phone: string | null;
+  location: string | null;
+  access_level: number | null;
+  private_fields_allowed: boolean;
 };
 
-const EMPLOYEE_PROFILE: EmployeeProfileData = {
-  initials: "ЕС",
-  name: "Елена Соколова",
-  role: "Старший специалист поддержки",
-  department: "Клиентский сервис",
-  status: "На связи",
-  timezone: "Москва · UTC+3",
-  email: "e.sokolova@nexa.team",
-  phone: "+7 495 120-48-12 · 214",
-  location: "Москва, офис Центр",
-  manager: "Дмитрий Морозов",
-  joinedAt: "С 14 марта 2022",
-  accessLevel: "Специалист L2",
-};
+function getInitials(fullName: string) {
+  return fullName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("ru-RU") || "NX";
+}
+
+async function signOutCurrentUser() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
 
 const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "overview", label: "Обзор" },
@@ -124,8 +128,43 @@ function priorityClass(p: string) {
 
 function NexaPrototype() {
   const [active, setActive] = useState<ScreenId>("overview");
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [canOpenAdmin, setCanOpenAdmin] = useState(false);
+  const [workspaceAccessSession, setWorkspaceAccessSession] = useState<Session | null>(null);
+  const [blockedSession, setBlockedSession] = useState<Session | null>(null);
+  const [currentProfile, setCurrentProfile] = useState<EmployeeProfileData | null>(null);
+  const checkAdmin = useServerFn(getAdminAccess);
+  const ensure = useServerFn(ensureProfile);
+  const loadCurrentProfile = useServerFn(getCurrentProfile);
+  const { session, loading } = useAuth();
   const navRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+
+  useEffect(() => {
+    let live = true;
+    setCanOpenAdmin(false);
+    if (session) {
+      ensure({ data: {} })
+        .then(() => loadCurrentProfile())
+        .then((profile) => {
+          if (!live) return;
+          if (profile.id !== session.user.id) throw new Error("Профиль не соответствует текущей сессии");
+          setCurrentProfile({ ...profile, initials: getInitials(profile.full_name) });
+          setWorkspaceAccessSession(session);
+          setBlockedSession(null);
+          void checkAdmin()
+            .then((result) => { if (live) setCanOpenAdmin(result.allowed); })
+            .catch(() => { if (live) setCanOpenAdmin(false); });
+        })
+        .catch(() => {
+          if (!live) return;
+          setCurrentProfile(null);
+          setWorkspaceAccessSession(session);
+          setBlockedSession(session);
+        });
+    }
+    return () => { live = false; };
+  }, [session, ensure, checkAdmin]);
 
   useLayoutEffect(() => {
     const nav = navRef.current;
@@ -142,6 +181,30 @@ function NexaPrototype() {
     observer.observe(nav);
     return () => observer.disconnect();
   }, [active]);
+
+  if (loading || session && workspaceAccessSession !== session) {
+    return (
+      <div className="dark flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Проверяем сессию…
+      </div>
+    );
+  }
+
+  if (!session) return <Navigate to="/auth" />;
+  if (blockedSession === session) {
+    return (
+      <div className="dark flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
+        <div role="alert" className="max-w-md rounded-lg border border-border bg-card p-6 text-center">
+          <h1 className="font-semibold">Доступ к NEXA закрыт</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Учётная запись отключена или не удалось подтвердить доступ. Обратитесь к администратору.</p>
+          <Button variant="outline" className="mt-4" onClick={() => void signOutCurrentUser().catch((error: Error) => toast.error(error.message))}>
+            <LogOut />
+            Выйти
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dark min-h-screen bg-background text-foreground">
@@ -182,6 +245,7 @@ function NexaPrototype() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3">
+            {canOpenAdmin && <button type="button" onClick={() => setAdminOpen((open) => !open)} className={`rounded-md border px-3 py-1.5 text-sm ${adminOpen ? "border-primary/50 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>Администрирование</button>}
             <button className="hidden rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground lg:block">
               Поиск
             </button>
@@ -194,19 +258,19 @@ function NexaPrototype() {
               onClick={() => setActive("profile")}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold transition-all duration-200 hover:bg-primary hover:text-primary-foreground active:scale-95"
             >
-              ЕС
+              {currentProfile?.initials ?? "NX"}
             </button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-8">
-        {active === "overview" && <Overview go={setActive} />}
-        {active === "tickets" && <Tickets />}
-        {active === "clients" && <Clients />}
-        {active === "knowledge" && <Knowledge />}
-        {active === "settings" && <Settings />}
-        {active === "profile" && <EmployeeProfile employee={EMPLOYEE_PROFILE} />}
+        {adminOpen ? <AdminPanel /> : active === "overview" && <Overview go={setActive} />}
+        {!adminOpen && active === "tickets" && <Tickets />}
+        {!adminOpen && active === "clients" && <Clients />}
+        {!adminOpen && active === "knowledge" && <Knowledge />}
+        {!adminOpen && active === "settings" && <Settings />}
+        {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} />}
       </main>
 
       <footer className="border-t border-border">
@@ -291,38 +355,8 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
 
 function Tickets() {
   return (
-    <div>
-      <SectionTitle title="Заявки" sub="Очередь обращений с приоритетами и статусами" />
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="px-4 py-3 font-medium">ID</th>
-              <th className="px-4 py-3 font-medium">Тема</th>
-              <th className="px-4 py-3 font-medium">Клиент</th>
-              <th className="px-4 py-3 font-medium">Приоритет</th>
-              <th className="px-4 py-3 font-medium">Статус</th>
-              <th className="px-4 py-3 font-medium">Агент</th>
-              <th className="px-4 py-3 font-medium">Возраст</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {TICKETS.map((t) => (
-              <tr key={t.id} className="hover:bg-secondary/50">
-                <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{t.id}</td>
-                <td className="px-4 py-3">{t.title}</td>
-                <td className="px-4 py-3 text-muted-foreground">{t.client}</td>
-                <td className={`px-4 py-3 text-xs font-medium ${priorityClass(t.priority)}`}>{t.priority}</td>
-                <td className="px-4 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass(t.status)}`}>{t.status}</span>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{t.agent}</td>
-                <td className="px-4 py-3 text-muted-foreground">{t.age}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+    <div className="animate-fade-in">
+      <TaskWorkspace />
     </div>
   );
 }
@@ -414,38 +448,42 @@ function Settings() {
   );
 }
 
-const PROFILE_TASKS = [
-  {
-    id: "NX-1042",
-    title: "Проверить синхронизацию почтового ящика",
-    meta: "ООО «Вектор» · высокий приоритет",
-    time: "Сегодня, 14:30",
-    state: "В работе",
-  },
-  {
-    id: "NX-1031",
-    title: "Подготовить отчёт по скорости портала",
-    meta: "АО «Меридиан» · высокий приоритет",
-    time: "Сегодня, 17:00",
-    state: "На проверке",
-  },
-  {
-    id: "NX-1026",
-    title: "Обновить инструкцию по SLA",
-    meta: "Внутренняя задача · средний приоритет",
-    time: "Завтра, 11:00",
-    state: "Запланировано",
-  },
-];
-
 function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
   const [contactCopied, setContactCopied] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const getMailbox = useServerFn(getMyCorporateMailbox);
+  const [mailbox, setMailbox] = useState<{ email: string; status: string; provider: string | null; created_at: string } | null>(null);
+
+  useEffect(() => {
+    getMailbox().then((value) => setMailbox(value)).catch(() => setMailbox(null));
+  }, [getMailbox]);
 
   const copyContact = async () => {
+    if (!employee.email) return;
     await navigator.clipboard?.writeText(employee.email);
     setContactCopied(true);
     window.setTimeout(() => setContactCopied(false), 1400);
   };
+
+  const signOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOutCurrentUser();
+    } catch (error) {
+      toast.error((error as Error).message);
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  const presenceLabel: Record<string, string> = {
+    online: "На связи",
+    away: "Отошёл",
+    offline: "Не в сети",
+  };
+  const joinedAt = employee.created_at
+    ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).format(new Date(employee.created_at))
+    : "Не указана";
 
   return (
     <div className="animate-fade-in">
@@ -453,6 +491,7 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div className="flex min-w-0 items-center gap-5">
             <Avatar className="h-20 w-20 rounded-lg border border-border bg-secondary shadow-sm sm:h-24 sm:w-24">
+              {employee.avatar_url && <AvatarImage src={employee.avatar_url} alt={employee.full_name} />}
               <AvatarFallback className="rounded-lg bg-secondary text-2xl font-semibold text-primary">
                 {employee.initials}
               </AvatarFallback>
@@ -461,24 +500,27 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  {employee.status}
+                  {presenceLabel[employee.presence] ?? (employee.presence || "Статус не указан")}
                 </span>
-                <span className="text-xs text-muted-foreground">{employee.timezone}</span>
               </div>
-              <h1 className="text-2xl font-semibold sm:text-3xl">{employee.name}</h1>
+              <h1 className="text-2xl font-semibold sm:text-3xl">{employee.full_name}</h1>
               <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
-                {employee.role} · {employee.department}
+                {employee.position || "Должность не указана"} · {employee.department || "Отдел не указан"}
               </p>
             </div>
           </div>
           <div className="flex shrink-0 gap-2">
-            <Button variant="outline" onClick={copyContact} className="active:scale-[0.98]">
+            <Button variant="outline" onClick={copyContact} disabled={!employee.email} className="active:scale-[0.98]">
               {contactCopied ? <Check /> : <AtSign />}
-              {contactCopied ? "Контакт скопирован" : "Скопировать контакт"}
+              {contactCopied ? "Контакт скопирован" : "Скопировать email"}
             </Button>
             <Button className="active:scale-[0.98]">
               <MessageSquare />
               Написать
+            </Button>
+            <Button variant="outline" onClick={() => void signOut()} disabled={signingOut} className="active:scale-[0.98]">
+              <LogOut />
+              {signingOut ? "Выходим…" : "Выйти"}
             </Button>
           </div>
         </div>
@@ -490,10 +532,10 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
             <h2 className="mb-3 text-sm font-medium">Рабочие показатели</h2>
             <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-card xl:grid-cols-4">
               {[
-                { value: "18", label: "Активных задач", note: "3 с высоким приоритетом" },
-                { value: "47", label: "Решено за месяц", note: "+8 к прошлому месяцу" },
-                { value: "6 мин", label: "Средний ответ", note: "Лучше цели на 2 мин" },
-                { value: "4.9", label: "Оценка клиентов", note: "96% положительных" },
+                { value: "—", label: "Активных задач", note: "Статистика профиля пока не подключена" },
+                { value: "—", label: "Решено за месяц", note: "Статистика профиля пока не подключена" },
+                { value: "—", label: "Средний ответ", note: "Статистика профиля пока не подключена" },
+                { value: "—", label: "Оценка клиентов", note: "Статистика профиля пока не подключена" },
               ].map((item, index) => (
                 <div
                   key={item.label}
@@ -512,35 +554,9 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
           </section>
 
           <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-medium">Текущая активность</h2>
-              <span className="text-xs text-muted-foreground">Обновлено 5 минут назад</span>
-            </div>
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
-              {PROFILE_TASKS.map((task, index) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  className={`group flex w-full items-center gap-4 px-4 py-4 text-left transition-all duration-200 hover:bg-secondary/45 active:bg-secondary/70 ${
-                    index ? "border-t border-border" : ""
-                  }`}
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground transition-colors group-hover:bg-primary/15 group-hover:text-primary">
-                    {index === 0 ? <Clock3 className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <span className="font-mono text-[11px] text-primary">{task.id}</span>
-                      <span className="text-sm font-medium">{task.title}</span>
-                    </div>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">{task.meta}</p>
-                  </div>
-                  <div className="hidden shrink-0 text-right sm:block">
-                    <div className="text-xs">{task.state}</div>
-                    <div className="mt-1 text-[11px] text-muted-foreground">{task.time}</div>
-                  </div>
-                </button>
-              ))}
+            <h2 className="mb-3 text-sm font-medium">Текущая активность</h2>
+            <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+              Данные активности для профиля пока не подключены.
             </div>
           </section>
 
@@ -549,13 +565,9 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
             <div className="rounded-lg border border-border bg-card p-5">
               <div className="flex items-end justify-between gap-4">
                 <div>
-                  <div className="text-2xl font-semibold">72%</div>
-                  <p className="mt-1 text-xs text-muted-foreground">18 из 25 задач в активном лимите</p>
+                  <div className="text-2xl font-semibold">—</div>
+                  <p className="mt-1 text-xs text-muted-foreground">Расчёт нагрузки по задачам пока не подключён.</p>
                 </div>
-                <span className="text-xs font-medium text-primary">Оптимальная</span>
-              </div>
-              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-secondary">
-                <div className="h-full w-[72%] rounded-full bg-primary transition-[width] duration-500" />
               </div>
             </div>
           </section>
@@ -563,12 +575,25 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
 
         <aside className="space-y-6">
           <section>
+            <h2 className="mb-3 text-sm font-medium">Корпоративная почта</h2>
+            <div className="rounded-lg border border-border bg-card p-4">
+              {mailbox ? <>
+                <div className="break-all text-sm font-medium">{mailbox.email}</div>
+                <div className="mt-2 text-xs text-muted-foreground">Статус: {{ pending: "Не подключена", active: "Активна", suspended: "Приостановлена", disabled: "Отключена", error: "Ошибка" }[mailbox.status] ?? mailbox.status}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Провайдер: {mailbox.provider ?? "Не настроен"}</div>
+                {mailbox.status === "pending" && <p className="mt-2 text-xs text-muted-foreground">Адрес зарезервирован в NEXA. Реальный почтовый ящик пока не создан.</p>}
+              </> : <p className="text-xs text-muted-foreground">Корпоративный адрес пока не назначен.</p>}
+            </div>
+          </section>
+          <section>
             <h2 className="mb-3 text-sm font-medium">Контакты</h2>
             <div className="space-y-1 rounded-lg border border-border bg-card p-3">
               {[
-                { icon: Mail, label: "Почта", value: employee.email },
-                { icon: Phone, label: "Телефон", value: employee.phone },
-                { icon: MapPin, label: "Локация", value: employee.location },
+                { icon: Mail, label: "Почта", value: employee.private_fields_allowed ? employee.email || "Не указана" : "Недоступна по RBAC" },
+                ...(employee.private_fields_allowed ? [
+                  { icon: Phone, label: "Телефон", value: employee.phone || "Не указан" },
+                  { icon: MapPin, label: "Локация", value: employee.location || "Не указана" },
+                ] : []),
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex gap-3 rounded-md p-2 transition-colors hover:bg-secondary/45">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -585,11 +610,10 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
             <h2 className="mb-3 text-sm font-medium">Рабочая информация</h2>
             <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
               {[
-                { icon: BriefcaseBusiness, label: "Должность", value: employee.role },
-                { icon: Building2, label: "Отдел", value: employee.department },
-                { icon: UserRound, label: "Руководитель", value: employee.manager },
-                { icon: CalendarDays, label: "В команде", value: employee.joinedAt },
-                { icon: ShieldCheck, label: "Уровень доступа", value: employee.accessLevel },
+                { icon: BriefcaseBusiness, label: "Должность", value: employee.position || "Не указана" },
+                { icon: Building2, label: "Отдел", value: employee.department || "Не указан" },
+                { icon: CalendarDays, label: "Профиль создан", value: joinedAt },
+                ...(employee.private_fields_allowed ? [{ icon: ShieldCheck, label: "Уровень доступа", value: employee.access_level ? `Уровень ${employee.access_level}` : "Не указан" }] : []),
               ].map(({ icon: Icon, label, value }) => (
                 <div key={label} className="flex gap-3 py-3.5">
                   <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />

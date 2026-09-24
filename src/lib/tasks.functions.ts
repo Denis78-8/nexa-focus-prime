@@ -31,7 +31,7 @@ export const getWorkspace = createServerFn({ method: "GET" })
       sb.from("projects").select("*").order("created_at"),
       sb.from("project_members").select("*"),
       sb.from("tasks").select("*").order("number", { ascending: false }),
-      sb.from("profiles").select("id, full_name, email, position, department, avatar_url, presence"),
+      sb.from("profiles").select("id, full_name, position, department, avatar_url, presence"),
       sb.from("task_time_entries").select("id, task_id, user_id, session_id, started_at").is("ended_at", null),
     ]);
     [projects, members, tasks, profiles, running].forEach((r) => fail(r.error));

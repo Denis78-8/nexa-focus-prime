@@ -95,6 +95,7 @@ function Workspace() {
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [mineOnly, setMineOnly] = useState(false);
   const data = ws.data;
 
   useEffect(() => {
@@ -131,6 +132,25 @@ function Workspace() {
               {p.code} · {p.name}
             </button>
           ))}
+          <div className="flex items-center rounded-md border border-border p-0.5">
+            {([
+              [false, "Все задачи"],
+              [true, "Мои задачи"],
+            ] as const).map(([mine, label]) => (
+              <button
+                key={label}
+                type="button"
+                aria-pressed={mineOnly === mine}
+                onClick={() => {
+                  setMineOnly(mine);
+                  setTaskId(null);
+                }}
+                className={`rounded px-2.5 py-1 text-xs transition-colors ${mineOnly === mine ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <NewProject onCreated={(id) => setProjectId(id)} />
         </div>
       </div>
@@ -143,7 +163,7 @@ function Workspace() {
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
           <div className="space-y-4">
             <NewTask projectId={project.id} members={membersOf(data, project.id)} parentId={null} />
-            <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} />
+            <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} />
             <Members data={data} projectId={project.id} />
           </div>
           <div>
@@ -172,7 +192,15 @@ function membersOf(data: WS, projectId: string) {
 function nameOf(data: WS, id: string | null) {
   if (!id) return "—";
   const p = data.profiles.find((x) => x.id === id);
-  return p?.full_name || p?.email || "Сотрудник";
+  return p?.full_name || "Сотрудник";
+}
+
+function toLocalDateTime(value: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
 }
 
 function liveSpent(task: Task, running: WS["running"], now: number) {
@@ -180,9 +208,21 @@ function liveSpent(task: Task, running: WS["running"], now: number) {
   return task.spent_seconds + open.reduce((acc, r) => acc + (now - new Date(r.started_at).getTime()) / 1000, 0);
 }
 
-function TaskTree({ tasks, running, selectedId, onSelect }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void }) {
+function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean }) {
   const now = useNow(running.length > 0);
-  const roots = tasks.filter((t) => !t.parent_task_id || !tasks.some((x) => x.id === t.parent_task_id));
+  const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
+  if (mineOnly) {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    for (const task of tasks) {
+      if (task.assignee_id !== userId) continue;
+      let parentId = task.parent_task_id;
+      while (parentId) {
+        visibleIds.add(parentId);
+        parentId = byId.get(parentId)?.parent_task_id ?? null;
+      }
+    }
+  }
+  const roots = tasks.filter((t) => visibleIds.has(t.id) && (!t.parent_task_id || !tasks.some((x) => x.id === t.parent_task_id)));
   const render = (t: Task, depth: number): React.ReactNode => (
     <div key={t.id}>
       <button
@@ -199,12 +239,12 @@ function TaskTree({ tasks, running, selectedId, onSelect }: { tasks: Task[]; run
         <span className="font-mono text-xs text-muted-foreground">{formatDuration(liveSpent(t, running, now))}</span>
         <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusTone(t.status)}`}>{STATUS_LABEL[t.status]}</span>
       </button>
-      {tasks.filter((c) => c.parent_task_id === t.id).map((c) => render(c, depth + 1))}
+      {tasks.filter((c) => visibleIds.has(c.id) && c.parent_task_id === t.id).map((c) => render(c, depth + 1))}
     </div>
   );
   return (
     <div className="rounded-lg border border-border bg-card p-2">
-      {tasks.length === 0 ? <div className="p-4 text-sm text-muted-foreground">В проекте пока нет задач.</div> : roots.map((t) => render(t, 0))}
+      {tasks.length === 0 ? <div className="p-4 text-sm text-muted-foreground">В проекте пока нет задач.</div> : roots.length === 0 ? <div className="p-4 text-sm text-muted-foreground">Нет задач, назначенных на вас.</div> : roots.map((t) => render(t, 0))}
     </div>
   );
 }
@@ -255,6 +295,7 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
   const [hours, setHours] = useState("");
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
   const [assignee, setAssignee] = useState("");
+  const [dueAt, setDueAt] = useState("");
   const m = useMutation({
     mutationFn: () =>
       create({
@@ -265,12 +306,14 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
           parentTaskId: parentId,
           assigneeId: assignee || null,
           estimatedSeconds: Math.round((parseFloat(hours.replace(",", ".")) || 0) * 3600),
+          dueAt: dueAt ? new Date(dueAt).toISOString() : null,
         },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: WS_KEY });
       setTitle("");
       setHours("");
+      setDueAt("");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -283,7 +326,8 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
       className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3"
     >
       <Input placeholder={parentId ? "Новая подзадача" : "Новая задача"} value={title} onChange={(e) => setTitle(e.target.value)} className="h-8 min-w-40 flex-1" required minLength={2} />
-      <Input placeholder="Оценка, ч" value={hours} onChange={(e) => setHours(e.target.value)} className="h-8 w-24" inputMode="decimal" />
+      <Input type="number" min="0" step="0.25" placeholder="Оценка, ч" value={hours} onChange={(e) => setHours(e.target.value)} className="h-8 w-24" inputMode="decimal" />
+      <Input aria-label="Срок выполнения" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className="h-8 w-44" />
       <select value={priority} onChange={(e) => setPriority(e.target.value as typeof priority)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
         {Object.entries(PRIORITY_LABEL).map(([k, v]) => (
           <option key={k} value={k}>{v}</option>
@@ -292,7 +336,7 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
       <select value={assignee} onChange={(e) => setAssignee(e.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-sm">
         <option value="">Без исполнителя</option>
         {members.map((p) => (
-          <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+          <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
         ))}
       </select>
       <Button size="sm" disabled={m.isPending} className="active:scale-[0.97]">Добавить</Button>
@@ -319,7 +363,7 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
       <h2 className="mb-2 text-sm font-medium">Участники проекта</h2>
       <div className="flex flex-wrap gap-1.5">
         {members.map((p) => (
-          <span key={p.id} className="rounded-full bg-secondary px-2.5 py-1 text-xs">{p.full_name || p.email}</span>
+          <span key={p.id} className="rounded-full bg-secondary px-2.5 py-1 text-xs">{p.full_name || "Сотрудник"}</span>
         ))}
       </div>
       {others.length > 0 && (
@@ -327,7 +371,7 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
           <select value={uid} onChange={(e) => setUid(e.target.value)} className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-sm">
             <option value="">Добавить сотрудника…</option>
             {others.map((p) => (
-              <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+              <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
             ))}
           </select>
           <Button size="sm" variant="outline" disabled={!uid || m.isPending} onClick={() => m.mutate()}>Добавить</Button>
@@ -351,6 +395,13 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
   const parent = data.tasks.find((t) => t.id === task.parent_task_id);
   const [report, setReport] = useState("");
   const [showReport, setShowReport] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(task.title);
+  const [descriptionDraft, setDescriptionDraft] = useState(task.description ?? "");
+  const [priorityDraft, setPriorityDraft] = useState(task.priority);
+  const [assigneeDraft, setAssigneeDraft] = useState(task.assignee_id ?? "");
+  const [estimateDraft, setEstimateDraft] = useState(task.estimated_seconds ? String(task.estimated_seconds / 3600) : "");
+  const [dueDraft, setDueDraft] = useState(toLocalDateTime(task.due_at));
 
   const act = useMutation({
     mutationFn: (v: { action: Action; report?: string }) =>
@@ -396,14 +447,56 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             <h2 className="mt-1 text-lg font-semibold">{task.title}</h2>
             {task.description && <p className="mt-1 text-sm text-muted-foreground">{task.description}</p>}
           </div>
-          <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs ${statusTone(task.status)}`}>{STATUS_LABEL[task.status]}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => {
+              setTitleDraft(task.title);
+              setDescriptionDraft(task.description ?? "");
+              setPriorityDraft(task.priority);
+              setAssigneeDraft(task.assignee_id ?? "");
+              setEstimateDraft(task.estimated_seconds ? String(task.estimated_seconds / 3600) : "");
+              setDueDraft(toLocalDateTime(task.due_at));
+              setEditing((value) => !value);
+            }}>{editing ? "Закрыть" : "Изменить"}</Button>
+            <span className={`rounded-full px-2.5 py-1 text-xs ${statusTone(task.status)}`}>{STATUS_LABEL[task.status]}</span>
+          </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {editing && (
+          <div className="mt-4 space-y-2 rounded-md border border-border p-3">
+            <Input aria-label="Название задачи" value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} maxLength={200} />
+            <Textarea aria-label="Описание задачи" value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} rows={3} maxLength={5000} placeholder="Описание" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <select aria-label="Приоритет" value={priorityDraft} onChange={(e) => setPriorityDraft(e.target.value as typeof task.priority)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                {Object.entries(PRIORITY_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+              </select>
+              <select aria-label="Исполнитель" value={assigneeDraft} onChange={(e) => setAssigneeDraft(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">Без исполнителя</option>
+                {membersOf(data, task.project_id).map((member) => <option key={member.id} value={member.id}>{member.full_name || "Сотрудник"}</option>)}
+              </select>
+              <Input aria-label="Оценка времени в часах" type="number" min="0" step="0.25" value={estimateDraft} onChange={(e) => setEstimateDraft(e.target.value)} inputMode="decimal" placeholder="Оценка, ч" />
+              <Input aria-label="Срок выполнения" type="datetime-local" value={dueDraft} onChange={(e) => setDueDraft(e.target.value)} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" disabled={patch.isPending || titleDraft.trim().length < 2} onClick={() => patch.mutate({
+                taskId: task.id,
+                title: titleDraft,
+                description: descriptionDraft || null,
+                priority: priorityDraft,
+                assigneeId: assigneeDraft || null,
+                estimatedSeconds: Math.round((parseFloat(estimateDraft.replace(",", ".")) || 0) * 3600),
+                dueAt: dueDraft ? new Date(dueDraft).toISOString() : null,
+              })}>Сохранить</Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Отмена</Button>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Stat label="Затрачено" value={formatDuration(spent)} accent={myRunning} warn={over} />
           <Stat label="Оценка" value={est ? formatDuration(est) : "—"} />
           <Stat label="Исполнитель" value={nameOf(data, task.assignee_id)} />
           <Stat label="Приоритет" value={PRIORITY_LABEL[task.priority] ?? task.priority} />
+          <Stat label="Срок" value={task.due_at ? new Date(task.due_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "Не задан"} />
         </div>
 
         <div className="mt-4">
