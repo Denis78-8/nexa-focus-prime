@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { TablesUpdate } from "@/integrations/supabase/types";
 
 /**
  * Единый источник истины для задач NEXA — таблица tasks в Lovable Cloud.
@@ -16,7 +17,7 @@ export const ensureProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { fullName?: string }) => z.object({ fullName: z.string().max(120).optional() }).parse(d))
   .handler(async ({ data, context }) => {
-    const { data: profile, error } = await context.supabase.rpc("ensure_my_profile", { _full_name: data.fullName ?? undefined });
+    const { data: profile, error } = await context.supabase.rpc("ensure_my_profile", data.fullName ? { _full_name: data.fullName } : {});
     fail(error);
     const { data: roles } = await context.supabase.from("user_roles").select("role").eq("user_id", context.userId);
     return { profile, roles: (roles ?? []).map((r) => r.role) };
@@ -66,7 +67,7 @@ export const createProject = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: project, error } = await context.supabase
       .from("projects")
-      .insert({ code: data.code.toUpperCase(), name: data.name, description: data.description, owner_id: context.userId })
+      .insert({ code: data.code.toUpperCase(), name: data.name, description: data.description ?? null, owner_id: context.userId })
       .select()
       .single();
     fail(error);
@@ -116,15 +117,15 @@ export const updateTask = createServerFn({ method: "POST" })
     taskFields.partial().extend({ taskId: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }) => {
-    const patch: Record<string, unknown> = {};
-    if (data.title !== undefined) patch.title = data.title;
-    if (data.description !== undefined) patch.description = data.description;
-    if (data.priority !== undefined) patch.priority = data.priority;
-    if (data.assigneeId !== undefined) patch.assignee_id = data.assigneeId;
-    if (data.estimatedSeconds !== undefined) patch.estimated_seconds = data.estimatedSeconds;
-    if (data.dueAt !== undefined) patch.due_at = data.dueAt;
-    if (data.progress !== undefined) patch.progress = data.progress;
-    if (data.parentTaskId !== undefined) patch.parent_task_id = data.parentTaskId;
+    const patch: TablesUpdate<"tasks"> = {};
+    if (data.title !== undefined) patch["title"] = data.title;
+    if (data.description !== undefined) patch["description"] = data.description;
+    if (data.priority !== undefined) patch["priority"] = data.priority;
+    if (data.assigneeId !== undefined) patch["assignee_id"] = data.assigneeId;
+    if (data.estimatedSeconds !== undefined) patch["estimated_seconds"] = data.estimatedSeconds;
+    if (data.dueAt !== undefined) patch["due_at"] = data.dueAt;
+    if (data.progress !== undefined) patch["progress"] = data.progress;
+    if (data.parentTaskId !== undefined) patch["parent_task_id"] = data.parentTaskId;
     const { data: task, error } = await context.supabase.from("tasks").update(patch).eq("id", data.taskId).select().single();
     fail(error);
     return task!;
@@ -136,7 +137,7 @@ export const transitionTask = createServerFn({ method: "POST" })
     z
       .object({
         taskId: z.string().uuid(),
-        action: z.enum(["start", "pause", "resume", "submit_review", "return_to_work", "complete", "cancel", "reopen"]),
+        action: z.enum(["start", "pause", "resume", "wait", "complete", "reopen"]),
         sessionId: z.string().min(8).max(100),
         report: z.string().max(10000).optional(),
       })
@@ -147,7 +148,7 @@ export const transitionTask = createServerFn({ method: "POST" })
       _task_id: data.taskId,
       _action: data.action,
       _session_id: data.sessionId,
-      _report: data.report ?? undefined,
+      ...(data.report ? { _report: data.report } : {}),
     });
     fail(error);
     return task;
