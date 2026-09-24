@@ -1,0 +1,13 @@
+revoke execute on function public.has_role(uuid, public.app_role) from public, anon;
+revoke execute on function public.can_access_project(uuid, uuid) from public, anon;
+revoke execute on function public.can_manage_project(uuid, uuid) from public, anon;
+revoke execute on function public.can_edit_task(uuid, uuid) from public, anon;
+grant execute on function public.has_role(uuid, public.app_role) to authenticated;
+grant execute on function public.can_access_project(uuid, uuid) to authenticated;
+grant execute on function public.can_manage_project(uuid, uuid) to authenticated;
+grant execute on function public.can_edit_task(uuid, uuid) to authenticated;
+revoke execute on function public.tasks_log_history() from public, anon, authenticated;
+revoke execute on function public.comments_log_history() from public, anon, authenticated;
+revoke execute on function public.tasks_after_change_parent() from public, anon, authenticated;
+revoke execute on function public._close_running_entry(uuid) from public, anon, authenticated;
+revoke execute on function public.recalc_parent_progress(uuid) from public, anon, authenticated;
