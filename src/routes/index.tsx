@@ -18,6 +18,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskWorkspace } from "@/components/nexa/TaskWorkspace";
 import { AdminPanel } from "@/components/nexa/AdminPanel";
+import { NotificationsCenter, useNotifications } from "@/components/nexa/NotificationsCenter";
 import { getAdminAccess } from "@/lib/admin.functions";
 import { getMyCorporateMailbox } from "@/lib/admin.functions";
 import { getCurrentProfile } from "@/lib/profile.functions";
@@ -49,7 +50,7 @@ export const Route = createFileRoute("/")({
   component: NexaPrototype,
 });
 
-type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | "profile";
+type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | "profile" | "notifications";
 
 type EmployeeProfileData = {
   initials: string;
@@ -81,6 +82,7 @@ const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "tickets", label: "Заявки" },
   { id: "clients", label: "Клиенты" },
   { id: "knowledge", label: "База знаний" },
+  { id: "notifications", label: "Уведомления" },
   { id: "settings", label: "Настройки" },
   { id: "profile", label: "Профиль" },
 ];
@@ -128,6 +130,7 @@ function priorityClass(p: string) {
 
 function NexaPrototype() {
   const [active, setActive] = useState<ScreenId>("overview");
+  const notifications = useNotifications();
   const [adminOpen, setAdminOpen] = useState(false);
   const [canOpenAdmin, setCanOpenAdmin] = useState(false);
   const [workspaceAccessSession, setWorkspaceAccessSession] = useState<Session | null>(null);
@@ -211,7 +214,7 @@ function NexaPrototype() {
       {/* Top bar */}
       <header className="sticky top-0 z-10 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-5 px-6 py-3 xl:gap-8">
-          <div className="flex items-center gap-2.5">
+          <div className="flex shrink-0 items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
               N
             </div>
@@ -222,7 +225,7 @@ function NexaPrototype() {
           </div>
 
           {/* Nav with sliding indicator */}
-          <nav ref={navRef} className="relative flex min-w-0 items-center gap-0.5 xl:gap-1">
+          <nav ref={navRef} className="relative flex min-w-0 items-center gap-0.5 overflow-x-auto xl:gap-1">
             {SCREENS.map((s) => (
               <button
                 key={s.id}
@@ -230,11 +233,11 @@ function NexaPrototype() {
                  type="button"
                 onClick={() => setActive(s.id)}
                  aria-current={active === s.id ? "page" : undefined}
-                className={`relative z-10 rounded-md px-2.5 py-2 text-sm transition-colors duration-200 active:scale-[0.97] xl:px-3.5 ${
+                className={`relative z-10 shrink-0 rounded-md px-2.5 py-2 text-sm transition-colors duration-200 active:scale-[0.97] xl:px-3.5 ${
                   active === s.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {s.label}
+                <span className="inline-flex items-center gap-1.5">{s.label}{s.id === "notifications" && notifications.unreadCount > 0 && <span className="flex min-w-4 h-4 items-center justify-center rounded-full bg-primary/15 px-1 text-[10px] font-semibold text-primary" aria-label={`${notifications.unreadCount} непрочитанных`}>{notifications.unreadCount}</span>}</span>
               </button>
             ))}
             <span
@@ -244,7 +247,7 @@ function NexaPrototype() {
             />
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
+           <div className="ml-auto flex shrink-0 items-center gap-3">
             {canOpenAdmin && <button type="button" onClick={() => setAdminOpen((open) => !open)} className={`rounded-md border px-3 py-1.5 text-sm ${adminOpen ? "border-primary/50 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>Администрирование</button>}
             <button className="hidden rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground lg:block">
               Поиск
@@ -269,6 +272,7 @@ function NexaPrototype() {
         {!adminOpen && active === "tickets" && <Tickets />}
         {!adminOpen && active === "clients" && <Clients />}
         {!adminOpen && active === "knowledge" && <Knowledge />}
+         {!adminOpen && active === "notifications" && <NotificationsCenter state={notifications} onOpenTickets={() => setActive("tickets")} />}
         {!adminOpen && active === "settings" && <Settings />}
         {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} />}
       </main>
