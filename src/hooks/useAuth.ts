@@ -5,21 +5,39 @@ import { supabase } from "@/integrations/supabase/client";
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [connectionError, setConnectionError] = useState(false);
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    void supabase.auth.getSession()
-      .then(({ data: d, error }) => {
-        if (error) throw error;
-        setSession(d.session);
-      })
-      .catch((error: unknown) => {
-        console.error("[NEXA Auth] Не удалось восстановить сессию", error);
-        setSession(null);
-      })
-      .finally(() => setLoading(false));
-    return () => data.subscription.unsubscribe();
+    let mounted = true;
+    let subscription: { unsubscribe: () => void } | undefined;
+    try {
+      const { data } = supabase.auth.onAuthStateChange((_e, s) => {
+        if (mounted) setSession(s);
+      });
+      subscription = data.subscription;
+      void supabase.auth.getSession()
+        .then(({ data: result, error }) => {
+          if (error) throw error;
+          if (mounted) setSession(result.session);
+        })
+        .catch((error: unknown) => {
+          console.error("[NEXA Auth] Не удалось восстановить сессию", error);
+          if (mounted) {
+            setSession(null);
+            setConnectionError(true);
+          }
+        })
+        .finally(() => { if (mounted) setLoading(false); });
+    } catch (error) {
+      console.error("[NEXA Auth] Не удалось подключиться", error);
+      setConnectionError(true);
+      setLoading(false);
+    }
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe();
+    };
   }, []);
 
-  return { session, user: session?.user ?? null, loading };
+  return { session, user: session?.user ?? null, loading, connectionError };
 }

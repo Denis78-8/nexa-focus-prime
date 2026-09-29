@@ -139,7 +139,7 @@ function NexaPrototype() {
   const checkAdmin = useServerFn(getAdminAccess);
   const ensure = useServerFn(ensureProfile);
   const loadCurrentProfile = useServerFn(getCurrentProfile);
-  const { session, loading } = useAuth();
+  const { session, loading, connectionError } = useAuth();
   const navRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState({ left: 0, width: 0 });
 
@@ -189,6 +189,18 @@ function NexaPrototype() {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         Проверяем сессию…
+      </div>
+    );
+  }
+
+  if (connectionError) {
+    return (
+      <div className="dark flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
+        <div role="alert" className="max-w-md border-t border-primary pt-5">
+          <h1 className="text-lg font-semibold">NEXA временно недоступен</h1>
+          <p className="mt-2 text-sm text-muted-foreground">Не удалось подключиться к рабочему пространству. Повторите попытку позже.</p>
+          <Button variant="outline" className="mt-5 border-border bg-card hover:bg-secondary hover:text-foreground" onClick={() => window.location.reload()}>Повторить</Button>
+        </div>
       </div>
     );
   }
