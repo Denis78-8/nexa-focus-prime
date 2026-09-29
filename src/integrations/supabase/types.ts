@@ -14,41 +14,198 @@ export type Database = {
   }
   public: {
     Tables: {
+      access_level_permissions: {
+        Row: {
+          access_level: number
+          permission_key: string
+        }
+        Insert: {
+          access_level: number
+          permission_key: string
+        }
+        Update: {
+          access_level?: number
+          permission_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_level_permissions_permission_key_fkey"
+            columns: ["permission_key"]
+            isOneToOne: false
+            referencedRelation: "permissions"
+            referencedColumns: ["key"]
+          },
+        ]
+      }
+      corporate_mailboxes: {
+        Row: {
+          created_at: string
+          created_by: string
+          disabled_at: string | null
+          domain: string
+          email: string
+          id: string
+          is_primary: boolean
+          local_part: string
+          metadata: Json | null
+          provider: string | null
+          provider_user_id: string | null
+          status: Database["public"]["Enums"]["corporate_mailbox_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          disabled_at?: string | null
+          domain: string
+          email: string
+          id?: string
+          is_primary?: boolean
+          local_part: string
+          metadata?: Json | null
+          provider?: string | null
+          provider_user_id?: string | null
+          status?: Database["public"]["Enums"]["corporate_mailbox_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          disabled_at?: string | null
+          domain?: string
+          email?: string
+          id?: string
+          is_primary?: boolean
+          local_part?: string
+          metadata?: Json | null
+          provider?: string | null
+          provider_user_id?: string | null
+          status?: Database["public"]["Enums"]["corporate_mailbox_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mailbox_audit_events: {
+        Row: {
+          action: Database["public"]["Enums"]["mailbox_audit_action"]
+          actor_user_id: string | null
+          created_at: string
+          id: string
+          mailbox_id: string | null
+          metadata: Json | null
+          target_user_id: string
+        }
+        Insert: {
+          action: Database["public"]["Enums"]["mailbox_audit_action"]
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          mailbox_id?: string | null
+          metadata?: Json | null
+          target_user_id: string
+        }
+        Update: {
+          action?: Database["public"]["Enums"]["mailbox_audit_action"]
+          actor_user_id?: string | null
+          created_at?: string
+          id?: string
+          mailbox_id?: string | null
+          metadata?: Json | null
+          target_user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mailbox_audit_events_mailbox_id_fkey"
+            columns: ["mailbox_id"]
+            isOneToOne: false
+            referencedRelation: "corporate_mailboxes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nexa_owners: {
+        Row: {
+          granted_at: string
+          user_id: string
+        }
+        Insert: {
+          granted_at?: string
+          user_id: string
+        }
+        Update: {
+          granted_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      permissions: {
+        Row: {
+          description: string
+          key: string
+        }
+        Insert: {
+          description: string
+          key: string
+        }
+        Update: {
+          description?: string
+          key?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
+          access_level: number
           avatar_url: string | null
           created_at: string
           department: string | null
           email: string | null
           full_name: string
           id: string
+          invitation_status: string
+          is_active: boolean
+          is_vip: boolean
           location: string | null
+          mailbox_status: string
           phone: string | null
           position: string | null
           presence: string
           updated_at: string
         }
         Insert: {
+          access_level?: number
           avatar_url?: string | null
           created_at?: string
           department?: string | null
           email?: string | null
           full_name?: string
           id: string
+          invitation_status?: string
+          is_active?: boolean
+          is_vip?: boolean
           location?: string | null
+          mailbox_status?: string
           phone?: string | null
           position?: string | null
           presence?: string
           updated_at?: string
         }
         Update: {
+          access_level?: number
           avatar_url?: string | null
           created_at?: string
           department?: string | null
           email?: string | null
           full_name?: string
           id?: string
+          invitation_status?: string
+          is_active?: boolean
+          is_vip?: boolean
           location?: string | null
+          mailbox_status?: string
           phone?: string | null
           position?: string | null
           presence?: string
@@ -117,6 +274,29 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      role_permissions: {
+        Row: {
+          permission_key: string
+          role: string
+        }
+        Insert: {
+          permission_key: string
+          role: string
+        }
+        Update: {
+          permission_key?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_permissions_permission_key_fkey"
+            columns: ["permission_key"]
+            isOneToOne: false
+            referencedRelation: "permissions"
+            referencedColumns: ["key"]
+          },
+        ]
       }
       task_comments: {
         Row: {
@@ -350,6 +530,10 @@ export type Database = {
     }
     Functions: {
       _close_running_entry: { Args: { _task_id: string }; Returns: number }
+      _close_running_entry_for_user: {
+        Args: { _task_id: string; _user_id: string }
+        Returns: number
+      }
       can_access_project: {
         Args: { _project_id: string; _user_id: string }
         Returns: boolean
@@ -362,16 +546,22 @@ export type Database = {
         Args: { _project_id: string; _user_id: string }
         Returns: boolean
       }
+      can_view_profile: { Args: { _profile_id: string }; Returns: boolean }
       ensure_my_profile: {
         Args: { _full_name?: string }
         Returns: {
+          access_level: number
           avatar_url: string | null
           created_at: string
           department: string | null
           email: string | null
           full_name: string
           id: string
+          invitation_status: string
+          is_active: boolean
+          is_vip: boolean
           location: string | null
+          mailbox_status: string
           phone: string | null
           position: string | null
           presence: string
@@ -384,6 +574,13 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_admin_panel_data: { Args: never; Returns: Json }
+      get_my_nexa_access_flags: { Args: never; Returns: Json }
+      has_permission: { Args: { _permission: string }; Returns: boolean }
+      has_permission_for: {
+        Args: { _permission: string; _user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -391,6 +588,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_active_user: { Args: { _user_id: string }; Returns: boolean }
       recalc_parent_progress: { Args: { _parent: string }; Returns: undefined }
       task_transition: {
         Args: {
@@ -427,9 +625,36 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      update_admin_employee: {
+        Args: {
+          _access_level: number
+          _department: string
+          _full_name: string
+          _is_active: boolean
+          _is_vip: boolean
+          _location: string
+          _phone: string
+          _position: string
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: Json
+      }
     }
     Enums: {
-      app_role: "admin" | "manager" | "employee"
+      app_role: "admin" | "manager" | "employee" | "director"
+      corporate_mailbox_status:
+        | "pending"
+        | "active"
+        | "suspended"
+        | "disabled"
+        | "error"
+      mailbox_audit_action:
+        | "mailbox_created"
+        | "mailbox_disabled"
+        | "mailbox_enabled"
+        | "mailbox_deleted"
+        | "mailbox_provision_failed"
       task_priority: "low" | "medium" | "high" | "critical"
       task_status: "todo" | "in_progress" | "waiting" | "done"
     }
@@ -559,7 +784,21 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "manager", "employee"],
+      app_role: ["admin", "manager", "employee", "director"],
+      corporate_mailbox_status: [
+        "pending",
+        "active",
+        "suspended",
+        "disabled",
+        "error",
+      ],
+      mailbox_audit_action: [
+        "mailbox_created",
+        "mailbox_disabled",
+        "mailbox_enabled",
+        "mailbox_deleted",
+        "mailbox_provision_failed",
+      ],
       task_priority: ["low", "medium", "high", "critical"],
       task_status: ["todo", "in_progress", "waiting", "done"],
     },
