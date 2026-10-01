@@ -37,6 +37,48 @@ export type Database = {
           },
         ]
       }
+      access_requests: {
+        Row: {
+          cancelled_at: string | null
+          created_at: string
+          current_level: number
+          id: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          cancelled_at?: string | null
+          created_at?: string
+          current_level: number
+          id?: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          cancelled_at?: string | null
+          created_at?: string
+          current_level?: number
+          id?: string
+          owner_user_id?: string
+          reason?: string
+          requested_level?: number
+          requester_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       corporate_mailboxes: {
         Row: {
           created_at: string
@@ -140,6 +182,50 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      notifications: {
+        Row: {
+          access_request_id: string | null
+          body: string | null
+          created_at: string
+          id: string
+          metadata: Json
+          read_at: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          access_request_id?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          read_at?: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          access_request_id?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json
+          read_at?: string | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_access_request_id_fkey"
+            columns: ["access_request_id"]
+            isOneToOne: false
+            referencedRelation: "access_requests"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       permissions: {
         Row: {
@@ -547,6 +633,50 @@ export type Database = {
         Returns: boolean
       }
       can_view_profile: { Args: { _profile_id: string }; Returns: boolean }
+      cancel_access_level_request: {
+        Args: { _request_id: string }
+        Returns: {
+          cancelled_at: string | null
+          created_at: string
+          current_level: number
+          id: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "access_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_access_level_request: {
+        Args: { _reason: string; _requested_level: number }
+        Returns: {
+          cancelled_at: string | null
+          created_at: string
+          current_level: number
+          id: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "access_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       ensure_my_profile: {
         Args: { _full_name?: string }
         Returns: {
@@ -575,6 +705,28 @@ export type Database = {
         }
       }
       get_admin_panel_data: { Args: never; Returns: Json }
+      get_my_access_level_requests: {
+        Args: never
+        Returns: {
+          cancelled_at: string | null
+          created_at: string
+          current_level: number
+          id: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "access_requests"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       get_my_nexa_access_flags: { Args: never; Returns: Json }
       has_permission: { Args: { _permission: string }; Returns: boolean }
       has_permission_for: {
@@ -590,6 +742,28 @@ export type Database = {
       }
       is_active_user: { Args: { _user_id: string }; Returns: boolean }
       recalc_parent_progress: { Args: { _parent: string }; Returns: undefined }
+      review_access_level_request: {
+        Args: { _decision: string; _request_id: string }
+        Returns: {
+          cancelled_at: string | null
+          created_at: string
+          current_level: number
+          id: string
+          owner_user_id: string
+          reason: string
+          requested_level: number
+          requester_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "access_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       task_transition: {
         Args: {
           _action: string
