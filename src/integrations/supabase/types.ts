@@ -130,6 +130,33 @@ export type Database = {
         }
         Relationships: []
       }
+      employee_credentials: {
+        Row: {
+          changed_at: string | null
+          expires_at: string
+          issued_at: string
+          issued_by: string | null
+          must_change_password: boolean
+          user_id: string
+        }
+        Insert: {
+          changed_at?: string | null
+          expires_at: string
+          issued_at?: string
+          issued_by?: string | null
+          must_change_password?: boolean
+          user_id: string
+        }
+        Update: {
+          changed_at?: string | null
+          expires_at?: string
+          issued_at?: string
+          issued_by?: string | null
+          must_change_password?: boolean
+          user_id?: string
+        }
+        Relationships: []
+      }
       mailbox_audit_events: {
         Row: {
           action: Database["public"]["Enums"]["mailbox_audit_action"]
@@ -705,6 +732,7 @@ export type Database = {
         }
       }
       get_admin_panel_data: { Args: never; Returns: Json }
+      get_employee_credential_states: { Args: never; Returns: Json }
       get_my_access_level_requests: {
         Args: never
         Returns: {
@@ -727,6 +755,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_my_credential_state: { Args: never; Returns: Json }
       get_my_nexa_access_flags: { Args: never; Returns: Json }
       has_permission: { Args: { _permission: string }; Returns: boolean }
       has_permission_for: {
@@ -764,6 +793,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      revoke_user_sessions: { Args: { _user_id: string }; Returns: number }
       task_transition: {
         Args: {
           _action: string
