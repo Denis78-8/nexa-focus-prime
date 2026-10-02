@@ -31,3 +31,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local tooling state (Supabase CLI cache, Claude Code preview config)
+supabase/.temp/
+.claude/

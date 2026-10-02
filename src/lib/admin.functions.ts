@@ -49,26 +49,28 @@ export const getAdminAccess = createServerFn({ method: "GET" })
 export const getAdminData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    await requirePermission(context, "employees.read");
-    await requirePermission(context, "profiles.private.read");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-    await requirePermission(context, "mailboxes.read");
-    const [profiles, roles, permissions, rolePermissions, levelPermissions, owners, mailboxes] = await Promise.all([
-      admin.from("profiles").select("id,full_name,email,position,department,phone,location,presence,access_level,is_vip,is_active,mailbox_status,invitation_status,created_at").order("full_name"),
-      admin.from("user_roles").select("user_id,role"),
-      admin.from("permissions").select("key,description").order("key"),
-      admin.from("role_permissions").select("role,permission_key"),
-      admin.from("access_level_permissions").select("access_level,permission_key"),
-      admin.from("nexa_owners").select("user_id"),
-      admin.from("corporate_mailboxes").select("id,user_id,email,local_part,domain,status,provider,is_primary,created_at,updated_at,disabled_at"),
-    ]);
-    [profiles, roles, permissions, rolePermissions, levelPermissions, owners, mailboxes].forEach((r) => fail(r.error));
+    await requirePermission(context, "admin.access");
+    const client = context.supabase as unknown as {
+      rpc: (name: string, args: Record<string, string>) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    const { data, error } = await client.rpc("get_admin_panel_data", {});
+    fail(error);
+    if (!data || typeof data !== "object") throw new Error("Сервер вернул пустые данные Admin Panel");
+    const { data: profilesWrite, error: profilesWriteError } = await client.rpc("has_permission", { _permission: "profiles.write" });
+    fail(profilesWriteError);
+    const result = data as {
+      employees: any[]; roles: any[]; permissions: any[]; rolePermissions: any[];
+      levelPermissions: any[]; owners: any[]; mailboxes: any[]; credentialManagementAllowed: boolean;
+      mailboxesAllowed: boolean;
+      capabilities: { employeesManage: boolean; rolesManage: boolean; accessLevelsManage: boolean; vipManage: boolean; systemManage: boolean; mailboxesRead: boolean; mailboxesManage: boolean };
+    };
+    // Permission-checked RPC: loading the panel needs no service-role secret.
+    const { data: credentials, error: credentialsError } = await client.rpc("get_employee_credential_states", {});
+    fail(credentialsError);
     return {
-      employees: profiles.data ?? [], roles: roles.data ?? [], permissions: permissions.data ?? [],
-      rolePermissions: rolePermissions.data ?? [], levelPermissions: levelPermissions.data ?? [],
-      owners: owners.data ?? [], mailboxes: mailboxes.data ?? [],
-      credentialManagementAllowed: (owners.data ?? []).some((owner: { user_id: string }) => owner.user_id === context.userId),
+      ...result,
+      credentials: (Array.isArray(credentials) ? credentials : []) as { user_id: string; must_change_password: boolean; expires_at: string; changed_at: string | null }[],
+      capabilities: { ...result.capabilities, profilesWrite: Boolean(profilesWrite) },
     };
   });
 
@@ -120,75 +122,51 @@ export const updateEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: z.input<typeof employeeInput>) => employeeInput.parse(d))
   .handler(async ({ data, context }) => {
-    await requirePermission(context, "employees.manage");
-    await requirePermission(context, "vip.manage");
-    const owner = await isOwner(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any; auth: any };
-    const [{ data: targetOwner, error: ownerError }, { data: targetRole, error: targetRoleError }] = await Promise.all([
-      admin.from("nexa_owners").select("user_id").eq("user_id", data.id).maybeSingle(),
-      admin.from("user_roles").select("role").eq("user_id", data.id).maybeSingle(),
-    ]);
-    fail(ownerError);
-    fail(targetRoleError);
-    if (targetOwner && !data.isActive) throw new Error("Учётную запись владельца нельзя деактивировать");
-    if (!owner && (targetOwner || targetRole?.role === "admin" || data.role === "admin" || data.role === "director" || data.id === context.userId && !data.isActive)) {
-      throw new Error("Изменять владельца, администратора, руководителя или блокировать собственный доступ может только владелец NEXA");
+    await requirePermission(context, "admin.access");
+    const client = context.supabase as unknown as {
+      rpc: (name: string, args: Record<string, string | number | boolean | null>) => Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+    if (import.meta.env.DEV) {
+      console.info("[NEXA Admin phone/location DEV] RPC arguments", {
+        userId: data.id,
+        phone: data.phone,
+        location: data.location,
+      });
     }
-    if (!owner && data.accessLevel > 3) throw new Error("Уровни 4–5 назначает только владелец NEXA");
-    const { error: profileError } = await admin.from("profiles").update({
-      full_name: data.fullName, position: data.position, department: data.department, phone: data.phone,
-      location: data.location, access_level: data.accessLevel, is_vip: data.isVip, is_active: data.isActive,
-    }).eq("id", data.id);
-    fail(profileError);
-    const { error: clearRolesError } = await admin.from("user_roles").delete().eq("user_id", data.id);
-    fail(clearRolesError);
-    const { error: roleError } = await admin.from("user_roles").insert({ user_id: data.id, role: data.role });
-    fail(roleError);
-    const { error: authError } = await admin.auth.admin.updateUserById(data.id, { ban_duration: data.isActive ? "none" : "876000h" });
-    fail(authError);
+    const { data: result, error } = await client.rpc("update_admin_employee", {
+      _user_id: data.id,
+      _full_name: data.fullName,
+      _position: data.position,
+      _department: data.department,
+      _phone: data.phone,
+      _location: data.location,
+      _access_level: data.accessLevel,
+      _role: data.role,
+      _is_vip: data.isVip,
+      _is_active: data.isActive,
+    });
+    fail(error);
+    if (!result || typeof result !== "object" || !(result as { ok?: unknown }).ok) {
+      throw new Error("Cloud не подтвердил сохранение данных сотрудника");
+    }
     return { ok: true };
   });
 
-const inviteInput = z.object({ email: z.string().trim().email().max(254), fullName: z.string().trim().min(2).max(120), position: z.string().trim().max(120).optional(), department: z.string().trim().max(120).optional(), role: z.enum(["employee", "manager", "director"]), accessLevel: z.number().int().min(1).max(5) });
-
-export const inviteEmployee = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((d: z.input<typeof inviteInput>) => inviteInput.parse(d))
-  .handler(async ({ data, context }) => {
-    await requirePermission(context, "employees.manage");
-    const owner = await isOwner(context);
-    if (!owner && (data.role !== "employee" || data.accessLevel > 3)) throw new Error("Повышенные роли и уровни назначает владелец NEXA");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { auth: any; from: (table: string) => any };
-    const { data: invited, error } = await admin.auth.admin.inviteUserByEmail(data.email, { data: { full_name: data.fullName } });
-    fail(error);
-    const uid = invited.user?.id;
-    if (!uid) throw new Error("Supabase не вернул идентификатор приглашённого пользователя");
-    const { error: profileError } = await admin.from("profiles").upsert({ id: uid, email: data.email, full_name: data.fullName, position: data.position ?? null, department: data.department ?? null, access_level: data.accessLevel, invitation_status: "sent", mailbox_status: "pending" });
-    const { error: roleError } = profileError ? { error: null } : await admin.from("user_roles").insert({ user_id: uid, role: data.role });
-    if (profileError || roleError) {
-      await admin.auth.admin.deleteUser(uid);
-      fail(profileError);
-      fail(roleError);
-    }
-    const proposal = await availableCorporateAddress(data.fullName, admin);
-    return { ok: true, userId: uid, invitationStatus: "sent", corporateEmailProposal: proposal.email };
-  });
-
-async function availableCorporateAddress(fullName: string, admin: { from: (table: string) => any }) {
+async function availableCorporateAddress(fullName: string, admin: { from: (table: string) => any }, forUserId?: string) {
   const { generateCorporateLocalPart, getCorporateMailDomain } = await import("@/lib/corporate-mail.server");
   const base = generateCorporateLocalPart(fullName);
   const domain = getCorporateMailDomain();
   const [mailboxResult, profileResult] = await Promise.all([
     admin.from("corporate_mailboxes").select("email"),
-    admin.from("profiles").select("email").not("email", "is", null),
+    admin.from("profiles").select("id,email").not("email", "is", null),
   ]);
   fail(mailboxResult.error);
   fail(profileResult.error);
   const occupied = new Set<string>([
     ...(mailboxResult.data ?? []).map((row: { email: string }) => row.email.toLowerCase()),
-    ...(profileResult.data ?? []).map((row: { email: string }) => row.email.toLowerCase()),
+    ...(profileResult.data ?? [])
+      .filter((row: { id: string }) => row.id !== forUserId)
+      .map((row: { email: string }) => row.email.toLowerCase()),
   ]);
   for (let suffix = 1; suffix <= 10000; suffix += 1) {
     const marker = suffix === 1 ? "" : String(suffix);
@@ -201,12 +179,12 @@ async function availableCorporateAddress(fullName: string, admin: { from: (table
 
 export const suggestCorporateEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { fullName: string }) => z.object({ fullName: z.string().trim().min(2).max(120) }).parse(d))
+  .inputValidator((d: { fullName: string; userId?: string }) => z.object({ fullName: z.string().trim().min(2).max(120), userId: z.string().uuid().optional() }).parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, "mailboxes.manage");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-    return availableCorporateAddress(data.fullName, admin);
+    return availableCorporateAddress(data.fullName, admin, data.userId);
   });
 
 export const reserveCorporateMailbox = createServerFn({ method: "POST" })
@@ -220,7 +198,7 @@ export const reserveCorporateMailbox = createServerFn({ method: "POST" })
     fail(profileError);
     if (!profile) throw new Error("Сотрудник не найден");
     if (!profile.is_active) throw new Error("Нельзя зарезервировать адрес для отключённого сотрудника");
-    const { email, localPart, domain } = await availableCorporateAddress(profile.full_name, admin);
+    const { email, localPart, domain } = await availableCorporateAddress(profile.full_name, admin, data.userId);
     if (email !== data.email) throw new Error(`Предложение уже изменилось. Обновите адрес: ${email}`);
     const { isValidCorporateEmail, getCorporateMailProvider } = await import("@/lib/corporate-mail.server");
     if (!isValidCorporateEmail(email, domain)) throw new Error("Адрес не прошёл серверную проверку формата");
@@ -286,6 +264,9 @@ export const updatePermissionMatrix = createServerFn({ method: "POST" })
   .inputValidator((d: z.input<typeof matrixInput>) => matrixInput.parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, data.kind === "role" ? "roles.manage" : "access_levels.manage");
+    if (data.kind === "level" && data.subject === "5" && data.permission === "admin.access" && !data.enabled) {
+      throw new Error("Доступ уровня 5 к Admin Panel обязателен и не может быть отключён");
+    }
     const owner = await isOwner(context);
     const protectedPermissions = ["admin.access", "employees.manage", "roles.manage", "access_levels.manage", "vip.manage", "system.manage", "mailboxes.manage"];
     if (data.kind === "role" && data.subject === "admin") throw new Error("Матрица admin защищена");

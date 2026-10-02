@@ -1,4 +1,17 @@
 project_id = "bbkfuuttrwtmultqjwyt"
 
+# Owner-only reset authenticated by its own OWNER_PASSWORD_RESET_TOKEN secret
+# (restored unchanged from 88c0ffb).
 [functions.owner-password-reset]
 verify_jwt = false
+
+# Employee credential lifecycle: the gateway rejects calls without a valid
+# user JWT; each function re-validates the caller with Auth as well.
+[functions.admin-create-employee]
+verify_jwt = true
+
+[functions.admin-reissue-temporary-password]
+verify_jwt = true
+
+[functions.complete-password-change]
+verify_jwt = true

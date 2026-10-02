@@ -129,3 +129,95 @@
     color: var(--color-foreground);
   }
 }
+
+
+/* ===== Ambient flow background =====
+   Layers (back to front): base → far stream → strand canvas
+   → haze → UI. Every layer is a large gradient field animated only through
+   transform/opacity, so motion stays on the compositor. Periods are long and
+   mutually incommensurate (prime seconds), so the combined motion does not
+   visibly repeat. Intensity is a single variable the rest of the app can
+   lower: calm routes, open dialogs and focused forms. */
+.nexa-flow {
+  --flow-intensity: 1;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(130% 100% at 50% -10%, oklch(0.19 0.012 255) 0%, transparent 65%),
+    oklch(0.135 0.008 255);
+}
+.nexa-flow[data-intensity="calm"] { --flow-intensity: 0.62; }
+/* Automatic dimming while a modal is open or a form field is being edited. */
+body:has([role="dialog"][data-state="open"]) .nexa-flow { --flow-intensity: 0.4; }
+body:has(form:focus-within) .nexa-flow { --flow-intensity: 0.55; }
+
+.nexa-flow__layers {
+  position: absolute;
+  inset: 0;
+  opacity: var(--flow-intensity);
+  transition: opacity 1.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.nexa-flow__stream {
+  position: absolute;
+  left: -35vmax;
+  right: -35vmax;
+  will-change: transform;
+  animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1); /* sine in-out */
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  -webkit-mask-image: radial-gradient(closest-side, #000 35%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 35%, transparent 100%);
+}
+
+/* Far stream: broad and dim, gives depth behind the main flow. */
+.nexa-flow__stream--far {
+  top: 2vh;
+  height: 70vmax;
+  background: linear-gradient(180deg,
+    transparent 22%,
+    oklch(0.42 0.03 245 / 0.18) 44%,
+    oklch(0.5 0.02 230 / 0.22) 52%,
+    oklch(0.36 0.04 160 / 0.12) 62%,
+    transparent 80%);
+  animation-name: nexa-flow-far;
+  animation-duration: 173s;
+}
+
+/* Main stream: fine light strands drawn by AmbientFlowBackground. */
+.nexa-flow__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Haze: evens out the field and keeps the reading area in the centre calm. */
+.nexa-flow__haze {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(60% 45% at 50% 40%, oklch(0.135 0.008 255 / 0.4) 0%, transparent 100%),
+    radial-gradient(150% 120% at 50% 45%, transparent 55%, oklch(0.1 0.006 255 / 0.6) 100%);
+}
+
+/* Drift, rotation, skew (the bend) and anisotropic scale (the deformation);
+   the mid keyframe is offset so the band never passes a symmetric pose. */
+@keyframes nexa-flow-far {
+  0% { transform: translate3d(-4vmax, 0, 0) rotate(-14deg) skewY(2deg) scale(1, 1); }
+  45% { transform: translate3d(3vmax, 3vmax, 0) rotate(-9deg) skewY(-3deg) scale(1.05, 0.9); }
+  100% { transform: translate3d(6vmax, -2vmax, 0) rotate(-17deg) skewY(4deg) scale(0.97, 1.08); }
+}
+
+/* Reduced motion: the composition stays, frozen in a balanced pose. */
+@media (prefers-reduced-motion: reduce) {
+  .nexa-flow__stream {
+    animation: none;
+    will-change: auto;
+  }
+  .nexa-flow__stream--far { transform: rotate(-13deg); }
+  .nexa-flow__layers { transition: none; }
+}
