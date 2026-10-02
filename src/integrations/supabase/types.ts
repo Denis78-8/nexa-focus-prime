@@ -758,7 +758,6 @@ export type Database = {
       get_my_credential_state: { Args: never; Returns: Json }
       get_my_nexa_access_flags: { Args: never; Returns: Json }
       has_permission: { Args: { _permission: string }; Returns: boolean }
-      get_my_credential_state: { Args: never; Returns: Json }
       has_permission_for: {
         Args: { _permission: string; _user_id: string }
         Returns: boolean
