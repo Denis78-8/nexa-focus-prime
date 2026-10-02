@@ -122,7 +122,9 @@ export const reviewAccessLevelRequest = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const row = requireRow(await context.supabase.rpc("review_access_level_request", {
       _request_id: data.requestId,
-      _decision: data.decision,
+      // The Cloud RPC takes the action verb; the resulting row status is the
+      // past tense checked below.
+      _decision: data.decision === "approved" ? "approve" : "reject",
     }), "Решение не подтверждено сервером");
     const status = toStatus(row.status);
     if (status !== data.decision) throw new Error("Решение не подтверждено сервером");
