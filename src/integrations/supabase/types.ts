@@ -755,6 +755,7 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      get_my_credential_state: { Args: never; Returns: Json }
       get_my_nexa_access_flags: { Args: never; Returns: Json }
       has_permission: { Args: { _permission: string }; Returns: boolean }
       get_my_credential_state: { Args: never; Returns: Json }
