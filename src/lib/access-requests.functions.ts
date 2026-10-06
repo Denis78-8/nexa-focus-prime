@@ -49,7 +49,13 @@ function toStatus(value: string): AccessRequestStatus {
 }
 
 function titleFor(row: AccessRequestRow, status: AccessRequestStatus, callerId: string) {
-  if (row.owner_user_id === callerId && row.requester_id !== callerId) return "Новый запрос на предоставление доступа";
+  // The owner's wording follows the request status; "new" only while it is pending.
+  if (row.owner_user_id === callerId && row.requester_id !== callerId) {
+    if (status === "pending") return "Новый запрос на предоставление доступа";
+    if (status === "approved") return "Заявка одобрена";
+    if (status === "rejected") return "Заявка отклонена";
+    return "Заявка отменена сотрудником";
+  }
   if (status === "approved") return "Доступ предоставлен";
   if (status === "rejected") return "Запрос на доступ отклонён";
   if (status === "cancelled") return "Запрос на доступ отменён";

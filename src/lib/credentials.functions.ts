@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
-export const TEMPORARY_PASSWORD_EXPIRED_MESSAGE = "Временный пароль истёк. Обратитесь к владельцу NEXA.";
+export const TEMPORARY_PASSWORD_EXPIRED_MESSAGE = "Временный пароль истёк. Обратитесь к владельцу LUNO DIGITAL.";
 
 // mustChangePassword is false and expiresAt null when the caller has no
 // credential requirement row (legacy accounts, the owner).

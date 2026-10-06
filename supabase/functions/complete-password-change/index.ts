@@ -45,7 +45,20 @@ serve(async (request, body) => {
     console.error("[complete-password-change] state update failed after password change", { userId: caller.id });
     throw new HttpError(500, "Пароль изменён, но статус учётной записи не обновлён. Обратитесь к владельцу NEXA.");
   }
+  // SEC-001: end every session issued before the change, including any opened
+  // with the temporary password. The caller signs in again with the new one.
+  const { error: revokeError } = await admin.rpc("revoke_user_sessions", { _user_id: caller.id });
+  if (revokeError) {
+    // Do not leave old sessions usable: put the account back under the
+    // mandatory change so is_active_user() keeps blocking them, then report.
+    await admin.from("employee_credentials")
+      .update({ must_change_password: true, changed_at: null })
+      .eq("user_id", caller.id);
+    console.error("[complete-password-change] session revocation failed", { userId: caller.id });
+    throw new HttpError(500, "Пароль изменён, но не удалось завершить прежние сессии. Доступ временно закрыт — повторите смену пароля или обратитесь к владельцу LUNO DIGITAL.");
+  }
+
   await admin.from("profiles").update({ invitation_status: "accepted" })
     .eq("id", caller.id).in("invitation_status", ["sent", "not_invited"]);
-  return json(request, 200, { ok: true });
+  return json(request, 200, { ok: true, sessionsRevoked: true });
 });

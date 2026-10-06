@@ -139,7 +139,8 @@
    visibly repeat. Intensity is a single variable the rest of the app can
    lower: calm routes, open dialogs and focused forms. */
 .nexa-flow {
-  --flow-intensity: 1;
+  /* Kept below full strength so the stream never competes with content. */
+  --flow-intensity: 0.78;
   position: fixed;
   inset: 0;
   z-index: -1;
@@ -221,3 +222,131 @@ body:has(form:focus-within) .nexa-flow { --flow-intensity: 0.55; }
   .nexa-flow__stream--far { transform: rotate(-13deg); }
   .nexa-flow__layers { transition: none; }
 }
+
+/* ===== Interface preferences (Settings) ===== */
+/* Compact mode: tighter Tailwind spacing for page content only. Header,
+   footer and dialogs keep the normal scale, and components marked
+   .density-fixed (switches, avatars, fixed-size controls) are not scaled. */
+html[data-density="compact"] main {
+  --spacing: 0.21rem;
+}
+html[data-density="compact"] main .density-fixed {
+  --spacing: 0.25rem;
+}
+/* Animations off: no CSS transitions or keyframe animations anywhere. */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  scroll-behavior: auto !important;
+}
+
+/* ===== Auth background ===== */
+/* Sign-in only: calm graphite field with soft warm ambient light in the
+   brand orange. Opaque, so it replaces the app-wide ribbon layer here. */
+.auth-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% 0%, oklch(0.19 0.006 60) 0%, transparent 60%),
+    linear-gradient(180deg, oklch(0.15 0.005 60) 0%, oklch(0.115 0.004 60) 100%);
+}
+
+.auth-bg__glow {
+  position: absolute;
+  /* No filter blur: each glow is a radial-gradient that already fades to
+     zero at its edge, so the light stays soft without offscreen blur passes. */
+  will-change: transform, opacity;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+/* Main warm light, low and to the left, mostly off-screen. */
+.auth-bg__glow--warm {
+  left: -18vmax;
+  bottom: -26vmax;
+  width: 62vmax;
+  height: 52vmax;
+  background: radial-gradient(closest-side, oklch(0.72 0.17 55 / 0.20), oklch(0.72 0.17 55 / 0) 100%);
+  animation-name: auth-drift-warm, auth-breathe;
+  animation-duration: 58s, 14s;
+}
+/* Faint ember, upper right. */
+.auth-bg__glow--ember {
+  right: -20vmax;
+  top: -22vmax;
+  width: 50vmax;
+  height: 44vmax;
+  background: radial-gradient(closest-side, oklch(0.68 0.15 48 / 0.11), oklch(0.68 0.15 48 / 0) 100%);
+  animation-name: auth-drift-ember, auth-breathe;
+  animation-duration: 71s, 19s;
+  animation-delay: 0s, -6s;
+}
+/* Neutral cool lift for depth, top centre. */
+.auth-bg__glow--cool {
+  left: 50%;
+  top: -30vmax;
+  width: 70vmax;
+  height: 46vmax;
+  margin-left: -35vmax;
+  background: radial-gradient(closest-side, oklch(0.6 0.015 250 / 0.07), oklch(0.6 0.015 250 / 0) 100%);
+  animation-name: auth-drift-cool;
+  animation-duration: 83s;
+}
+
+/* Keeps the area behind the card the quietest part of the screen. */
+.auth-bg__calm {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(38rem 30rem at 50% 50%, oklch(0.13 0.005 60 / 0.75), transparent 70%);
+}
+
+/* Very light grain, so the gradients do not band. */
+.auth-bg__grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.auth-bg__particle {
+  position: absolute;
+  border-radius: 9999px;
+  background: oklch(0.85 0.06 60);
+  opacity: 0.18;
+  animation: auth-float ease-in-out infinite alternate;
+}
+
+@keyframes auth-drift-warm {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(6vmax, -3vmax, 0) scale(1.06); }
+}
+@keyframes auth-drift-ember {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(-5vmax, 4vmax, 0) scale(1.05); }
+}
+@keyframes auth-drift-cool {
+  from { transform: translate3d(-3vmax, 0, 0); }
+  to { transform: translate3d(3vmax, 2vmax, 0); }
+}
+@keyframes auth-breathe {
+  from { opacity: 0.8; }
+  to { opacity: 1; }
+}
+@keyframes auth-float {
+  from { transform: translate3d(0, 0, 0); opacity: 0.08; }
+  to { transform: translate3d(0, -24px, 0); opacity: 0.24; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-bg__glow,
+  .auth-bg__particle { animation: none; will-change: auto; }
+}
+html[data-motion="off"] .auth-bg__glow,
+html[data-motion="off"] .auth-bg__particle { animation: none; will-change: auto; }

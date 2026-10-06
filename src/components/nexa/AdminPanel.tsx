@@ -162,7 +162,7 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
       const result = await reserveMailbox({ data: { userId, email } });
       setProposals((current) => { const next = { ...current }; delete next[userId]; return next; });
       if (result.provisioning === "provider_not_configured") {
-        toast.message(`Адрес ${result.mailbox.email} зарезервирован в NEXA. Реальный почтовый ящик не создан: провайдер не подключён.`);
+        toast.message(`Адрес ${result.mailbox.email} зарезервирован в LUNO DIGITAL. Реальный почтовый ящик не создан: провайдер не подключён.`);
       } else if (result.provisioning === "provider_error") {
         toast.error(`Адрес ${result.mailbox.email} зарезервирован, но внешний провайдер вернул ошибку. Ящик не активирован.`);
       } else {
@@ -273,7 +273,7 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
 
   return <div className="space-y-8">
     <header>
-      <h1 className="text-xl font-semibold">NEXA Admin Panel</h1>
+      <h1 className="text-xl font-semibold">Администрирование LUNO DIGITAL</h1>
       <p className="mt-1 text-sm text-muted-foreground">Сотрудники, доступ и состояние системы. Каждое изменение проверяется сервером.</p>
     </header>
 
@@ -328,9 +328,9 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2 font-medium"><span>{draft.fullName || person.full_name}</span>{isDirector(draft.role, draft.position) && <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Директор</span>}{draft.isVip && (data.capabilities.vipManage ? <button type="button" aria-label="Отключить VIP" aria-pressed="true" onClick={() => patchDraft(person.id, { isVip: false })} className="inline-flex items-center rounded-full border border-amber-300/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.16)]">✦ VIP</button> : <span className="inline-flex items-center rounded-full border border-amber-300/30 bg-amber-400/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.16)]">✦ VIP</span>)}{!draft.isVip && data.capabilities.vipManage && <button type="button" aria-label="Включить VIP" aria-pressed="false" onClick={() => patchDraft(person.id, { isVip: true })} className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">+ VIP</button>}{data.owners.some((owner) => owner.user_id === person.id) && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] text-primary">Владелец</span>}</div><div className="mt-1 text-xs text-muted-foreground">Auth: {person.email} · {person.department || "Без отдела"} · Приглашение: {person.invitation_status}</div></div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1" title={data.owners.some((owner) => owner.user_id === person.id) ? "Роль владельца NEXA нельзя изменить" : undefined}>
+                <span className="inline-flex items-center gap-1" title={data.owners.some((owner) => owner.user_id === person.id) ? "Роль владельца LUNO DIGITAL нельзя изменить" : undefined}>
                   <select aria-label="Роль" disabled={!data.capabilities.rolesManage || data.owners.some((owner) => owner.user_id === person.id)} className="rounded-md border border-border bg-background px-2 py-1.5 text-xs" value={draft.role} onChange={(e) => patchDraft(person.id, { role: e.target.value as Role })}><option value="employee">Сотрудник</option><option value="manager">Менеджер</option><option value="director">Директор</option><option value="admin">Администратор</option></select>
-                  {data.owners.some((owner) => owner.user_id === person.id) && <span aria-label="Роль владельца NEXA нельзя изменить" className="text-muted-foreground"><LockKeyhole className="h-3.5 w-3.5" /></span>}
+                  {data.owners.some((owner) => owner.user_id === person.id) && <span aria-label="Роль владельца LUNO DIGITAL нельзя изменить" className="text-muted-foreground"><LockKeyhole className="h-3.5 w-3.5" /></span>}
                 </span>
                 <select aria-label="Уровень доступа" disabled={!data.capabilities.accessLevelsManage || !viewerIsOwner} className="rounded-md border border-border bg-background px-2 py-1.5 text-xs" value={draft.accessLevel} onChange={(e) => patchDraft(person.id, { accessLevel: Number(e.target.value) })}>{[1,2,3,4,5].map((level) => <option key={level} value={level}>Уровень {level}</option>)}</select>
                 <label className="flex items-center gap-1 text-xs"><input type="checkbox" disabled={!data.capabilities.employeesManage} checked={draft.isActive} onChange={(e) => patchDraft(person.id, { isActive: e.target.checked })} /> Активен</label>
@@ -380,7 +380,7 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
                   <span className="text-sm">Предлагаемый адрес: <strong>{proposedEmail ?? "ещё не сформирован"}</strong></span>
                   {!proposedEmail && <Button variant="outline" size="sm" disabled={busy} onClick={() => void proposeForEmployee(person)}>Предложить адрес</Button>}
                   {proposedEmail && <Button size="sm" disabled={busy} onClick={() => void createMailboxReservation(person.id, proposedEmail)}>Создать корпоративную почту</Button>}
-                  <span className="basis-full text-xs text-muted-foreground">Provider: не настроен. Подтверждение адреса зарезервирует его в NEXA, но не создаст внешний почтовый ящик.</span>
+                  <span className="basis-full text-xs text-muted-foreground">Provider: не настроен. Подтверждение адреса зарезервирует его в LUNO DIGITAL, но не создаст внешний почтовый ящик.</span>
                 </div>;
               })()}
             </div>}

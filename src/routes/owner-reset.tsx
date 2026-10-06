@@ -60,7 +60,7 @@ function OwnerPasswordSetup() {
         <h1 className="text-lg font-semibold">Первичная установка пароля владельца</h1>
         {success ? (
           <p role="status" className="mt-4 rounded-md border border-primary/30 bg-primary/10 p-3 text-sm">
-            Пароль владельца успешно изменён. Войдите в NEXA под {OWNER_EMAIL}.
+            Пароль владельца успешно изменён. Войдите в LUNO DIGITAL под {OWNER_EMAIL}.
           </p>
         ) : (
           <form onSubmit={(event) => void submit(event)} className="mt-5 space-y-4">

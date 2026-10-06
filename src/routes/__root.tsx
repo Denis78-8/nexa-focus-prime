@@ -4,12 +4,14 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
 import { Toaster } from "@/components/ui/sonner";
+import { applyUiPreferences, readUiPreferences } from "@/lib/ui-preferences";
 import appCss from "../styles.css?url";
 import { AmbientFlowBackground } from "@/components/nexa/AmbientFlowBackground";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -36,7 +38,7 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
@@ -79,11 +81,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "NEXA Helpdesk" },
-      { name: "description", content: "Рабочее пространство службы поддержки NEXA." },
-      { name: "author", content: "NEXA" },
-      { property: "og:title", content: "NEXA Helpdesk" },
-      { property: "og:description", content: "Рабочее пространство службы поддержки NEXA." },
+      { title: "LUNO DIGITAL" },
+      { name: "description", content: "Рабочее пространство команды LUNO DIGITAL." },
+      { name: "author", content: "LUNO DIGITAL" },
+      { property: "og:title", content: "LUNO DIGITAL" },
+      { property: "og:description", content: "Рабочее пространство команды LUNO DIGITAL." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
@@ -93,7 +95,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
+      { rel: "icon", href: "/favicon-32.png", type: "image/png", sizes: "32x32" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
     ],
   }),
   shellComponent: RootShell,
@@ -118,10 +122,17 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  // Restore this browser's interface preferences (animations, density) on load.
+  useEffect(() => {
+    applyUiPreferences(readUiPreferences());
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AmbientFlowBackground />
+      {/* /auth has its own quiet backdrop (AuthBackground); the animated
+          ribbon canvas is not mounted there at all. */}
+      {pathname !== "/auth" && <AmbientFlowBackground />}
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       {/* Single app-wide toaster; without it toast() calls were silent. */}

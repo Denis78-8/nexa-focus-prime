@@ -1,27 +1,35 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AtSign,
-  Bell,
-  BriefcaseBusiness,
-  Building2,
-  CalendarDays,
   Check,
-  Mail,
   LogOut,
-  MapPin,
   MessageSquare,
-  Phone,
-  ShieldCheck,
-  Sparkles,
 } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { TaskWorkspace } from "@/components/nexa/TaskWorkspace";
-import { AdminPanel } from "@/components/nexa/AdminPanel";
+import { STATUS_LABEL, TaskWorkspace } from "@/components/nexa/TaskWorkspace";
+import { getWorkspace } from "@/lib/tasks.functions";
+import { BrandLogo } from "@/components/nexa/BrandLogo";
+
+// Heavy tabs load on first open, not with the initial page.
+const AdminPanel = lazy(() => import("@/components/nexa/AdminPanel").then((m) => ({ default: m.AdminPanel })));
+const EmployeeDirectory = lazy(() => import("@/components/nexa/EmployeeDirectory").then((m) => ({ default: m.EmployeeDirectory })));
+const KnowledgeBase = lazy(() => import("@/components/nexa/KnowledgeBase").then((m) => ({ default: m.KnowledgeBase })));
+const SettingsPanel = lazy(() => import("@/components/nexa/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
+
+function TabLoading() {
+  return (
+    <div role="status" className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">
+      Загрузка…
+    </div>
+  );
+}
+import { EditableProfileAvatar, ProfileAvatar } from "@/components/nexa/ProfileAvatar";
+import { NOTIFICATIONS_QUERY_KEY, NotificationsCenter, useMyNotifications } from "@/components/nexa/NotificationsCenter";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, realPhone, realValue } from "@/components/nexa/profile-display";
 import { getAdminAccess } from "@/lib/admin.functions";
-import { getMyCorporateMailbox } from "@/lib/admin.functions";
 import { getAuthGateDiagnostics, getCurrentProfile } from "@/lib/profile.functions";
 import { getMyCredentialState, TEMPORARY_PASSWORD_EXPIRED_MESSAGE } from "@/lib/credentials.functions";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -40,18 +48,16 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "NEXA Helpdesk — Obsidian Flow" },
+      { title: "LUNO DIGITAL" },
       {
         name: "description",
-        content:
-          "Интерактивный прототип интерфейса NEXA Helpdesk в строгом graphite/orange стиле: обзор, заявки, клиенты, база знаний и настройки.",
+        content: "LUNO DIGITAL — рабочее пространство команды: обзор, сотрудники, задачи, база знаний и уведомления.",
       },
       { property: "og:type", content: "website" },
-      { property: "og:title", content: "NEXA Helpdesk — Obsidian Flow" },
+      { property: "og:title", content: "LUNO DIGITAL" },
       {
         property: "og:description",
-        content:
-          "Прототип NEXA Helpdesk: графитовый фон, тёплый оранжевый акцент, живая верхняя навигация.",
+        content: "LUNO DIGITAL — рабочее пространство команды.",
       },
       { name: "twitter:card", content: "summary" },
     ],
@@ -59,7 +65,7 @@ export const Route = createFileRoute("/")({
   component: NexaPrototype,
 });
 
-type ScreenId = "overview" | "tickets" | "clients" | "knowledge" | "settings" | "profile" | "notifications";
+type ScreenId = "overview" | "employees" | "tickets" | "knowledge" | "settings" | "profile" | "notifications";
 
 type EmployeeProfileData = {
   initials: string;
@@ -118,54 +124,25 @@ async function signOutCurrentUser() {
 
 const SCREENS: { id: ScreenId; label: string }[] = [
   { id: "overview", label: "Обзор" },
-  { id: "tickets", label: "Заявки" },
-  { id: "clients", label: "Клиенты" },
+  { id: "employees", label: "Сотрудники" },
+  { id: "tickets", label: "Задачи" },
   { id: "knowledge", label: "База знаний" },
   { id: "notifications", label: "Уведомления" },
   { id: "settings", label: "Настройки" },
   { id: "profile", label: "Профиль" },
 ];
 
-const TICKETS = [
-  { id: "NX-1042", title: "Не синхронизируется почтовый ящик", client: "ООО «Вектор»", priority: "Высокий", status: "В работе", agent: "А. Соколова", age: "12 мин" },
-  { id: "NX-1041", title: "Ошибка 500 при экспорте отчёта", client: "АО «Меридиан»", priority: "Критический", status: "Новая", agent: "—", age: "26 мин" },
-  { id: "NX-1038", title: "Добавить роль наблюдателя", client: "ИП Ким", priority: "Средний", status: "Ожидает", agent: "Д. Орлов", age: "1 ч" },
-  { id: "NX-1035", title: "Сброс двухфакторной аутентификации", client: "ООО «Север»", priority: "Низкий", status: "Решена", agent: "М. Литвин", age: "3 ч" },
-  { id: "NX-1031", title: "Медленная загрузка портала", client: "АО «Меридиан»", priority: "Высокий", status: "В работе", agent: "А. Соколова", age: "5 ч" },
-];
-
-const CLIENTS = [
-  { name: "АО «Меридиан»", plan: "Enterprise", open: 6, sla: "99.9%" },
-  { name: "ООО «Вектор»", plan: "Business", open: 3, sla: "99.5%" },
-  { name: "ООО «Север»", plan: "Business", open: 1, sla: "99.8%" },
-  { name: "ИП Ким", plan: "Starter", open: 2, sla: "98.9%" },
-];
-
-const ARTICLES = [
-  { title: "Подключение почтового канала", views: 1284, updated: "2 дня назад" },
-  { title: "Настройка SLA-политик", views: 961, updated: "5 дней назад" },
-  { title: "Роли и права доступа", views: 847, updated: "1 неделю назад" },
-  { title: "Экспорт отчётов в CSV", views: 402, updated: "2 недели назад" },
-];
-
 function statusClass(status: string) {
   switch (status) {
-    case "Новая":
+    case "todo":
       return "bg-primary/15 text-primary";
-    case "В работе":
+    case "in_progress":
       return "bg-secondary text-secondary-foreground";
-    case "Ожидает":
-      return "bg-secondary text-muted-foreground";
     default:
       return "bg-secondary text-muted-foreground";
   }
 }
 
-function priorityClass(p: string) {
-  if (p === "Критический") return "text-destructive";
-  if (p === "Высокий") return "text-primary";
-  return "text-muted-foreground";
-}
 
 function NexaPrototype() {
   const [active, setActive] = useState<ScreenId>("overview");
@@ -179,6 +156,9 @@ function NexaPrototype() {
   const [authGateDiagnostics, setAuthGateDiagnostics] = useState<AuthGateDiagnosticsState | null>(null);
   const [authCheckAttempt, setAuthCheckAttempt] = useState(0);
   const [credentialGate, setCredentialGate] = useState<"change" | "expired" | null>(null);
+  const queryClient = useQueryClient();
+  const notifications = useMyNotifications(Boolean(currentProfile));
+  const unreadNotifications = (notifications.data ?? []).filter((item) => !item.read_at).length;
   const loadCredentialState = useServerFn(getMyCredentialState);
   const checkAdmin = useServerFn(getAdminAccess);
   const loadCurrentProfile = useServerFn(getCurrentProfile);
@@ -360,6 +340,12 @@ function NexaPrototype() {
     return () => { live = false; };
   }, [active, session, blockedSession, loadCurrentProfile]);
 
+  // After a new profile photo: reload the own profile and the directory, which show it.
+  const refreshAfterAvatarChange = async () => {
+    if (session) await refreshProfileAfterEmployeeSave(session.user.id);
+    await queryClient.invalidateQueries({ queryKey: ["nexa", "directory"] });
+  };
+
   const refreshProfileAfterEmployeeSave = async (userId: string) => {
     if (!session || userId !== session.user.id) return;
     const profile = await loadCurrentProfile();
@@ -395,7 +381,7 @@ function NexaPrototype() {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
         <div role="alert" className="max-w-md border-t border-primary pt-5">
-          <h1 className="text-lg font-semibold">NEXA временно недоступен</h1>
+          <h1 className="text-lg font-semibold">LUNO DIGITAL временно недоступен</h1>
           <p className="mt-2 text-sm text-muted-foreground">Не удалось подключиться к рабочему пространству. Повторите попытку позже.</p>
           <Button variant="outline" className="mt-5 border-border bg-card hover:bg-secondary hover:text-foreground" onClick={() => window.location.reload()}>Повторить</Button>
         </div>
@@ -409,7 +395,7 @@ function NexaPrototype() {
     return (
       <div className="dark flex min-h-screen items-center justify-center px-6 text-foreground">
         <div role="alert" className="max-w-md rounded-lg border border-border bg-card p-6 text-center">
-          <h1 className="font-semibold">Доступ к NEXA закрыт</h1>
+          <h1 className="font-semibold">Доступ к LUNO DIGITAL закрыт</h1>
           <p className="mt-2 text-sm text-muted-foreground">{TEMPORARY_PASSWORD_EXPIRED_MESSAGE}</p>
           <Button variant="outline" className="mt-4" onClick={() => void signOutCurrentUser().catch((error: Error) => toast.error(error.message))}>
             <LogOut />
@@ -423,12 +409,12 @@ function NexaPrototype() {
     return (
       <div className="dark flex min-h-screen items-center justify-center px-6 text-foreground">
         <div role="alert" className="max-w-md rounded-lg border border-border bg-card p-6 text-center">
-          <h1 className="font-semibold">Доступ к NEXA закрыт</h1>
+          <h1 className="font-semibold">Доступ к LUNO DIGITAL закрыт</h1>
           {authGateDiagnostics?.stage === "get_my_credential_state" ? (
             // A failed credential-state check is a server/schema problem, not a
             // disabled account; show the real error instead of a generic denial.
             <p className="mt-2 text-sm text-muted-foreground">
-              Не удалось проверить состояние учётных данных: {authGateDiagnostics.errorText ?? "неизвестная ошибка"}. Обратитесь к владельцу NEXA.
+              Не удалось проверить состояние учётных данных: {authGateDiagnostics.errorText ?? "неизвестная ошибка"}. Обратитесь к владельцу LUNO DIGITAL.
             </p>
           ) : (
             <p className="mt-2 text-sm text-muted-foreground">Учётная запись отключена или не удалось подтвердить доступ. Обратитесь к администратору.</p>
@@ -481,20 +467,13 @@ function NexaPrototype() {
   return (
     <div className="dark min-h-screen text-foreground">
       {/* Top bar */}
-      <header className="sticky top-0 z-10 border-b border-border bg-background/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-5 px-6 py-3 xl:gap-8">
-          <div className="flex shrink-0 items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
-              N
-            </div>
-            <div className="leading-tight">
-              <div className="text-sm font-semibold tracking-wide">NEXA</div>
-              <div className="text-[11px] text-muted-foreground">Helpdesk · Obsidian Flow</div>
-            </div>
-          </div>
+      <header className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-6 xl:gap-6">
+          <BrandLogo height={34} />
 
           {/* Nav with sliding indicator */}
-          <nav ref={navRef} className="relative flex min-w-0 items-center gap-0.5 overflow-x-auto xl:gap-1">
+          {/* Nav with sliding indicator */}
+          <nav ref={navRef} className="relative flex h-16 min-w-0 items-center gap-0.5 overflow-x-auto xl:gap-1">
             {SCREENS.map((s) => (
               <button
                 key={s.id}
@@ -502,11 +481,18 @@ function NexaPrototype() {
                  type="button"
                 onClick={() => setActive(s.id)}
                  aria-current={active === s.id ? "page" : undefined}
-                className={`relative z-10 shrink-0 rounded-md px-2.5 py-2 text-sm transition-colors duration-200 active:scale-[0.97] xl:px-3.5 ${
-                  active === s.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                className={`relative z-10 h-9 shrink-0 rounded-md px-3 text-sm transition-colors duration-200 active:scale-[0.97] ${
+                  active === s.id ? "bg-secondary/70 text-foreground" : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
                 }`}
               >
-                {s.label}
+                {s.id === "notifications" && unreadNotifications > 0 ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {s.label}
+                    <span aria-label={`Непрочитанных: ${unreadNotifications}`} className="min-w-[1.125rem] rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-[1.125rem] text-primary-foreground">
+                      {unreadNotifications > 99 ? "99+" : unreadNotifications}
+                    </span>
+                  </span>
+                ) : s.label}
               </button>
             ))}
             <span
@@ -516,40 +502,39 @@ function NexaPrototype() {
             />
           </nav>
 
-           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {canOpenAdmin && <button type="button" onClick={() => setAdminOpen((open) => !open)} className={`rounded-md border px-3 py-1.5 text-sm ${adminOpen ? "border-primary/50 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>Администрирование</button>}
-            <button className="hidden rounded-md border border-border bg-card px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground lg:block">
-              Поиск
-            </button>
-            <button type="button" onClick={() => setNewRequestStep("choose")} className="rounded-md bg-primary px-3.5 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {canOpenAdmin && <button type="button" aria-pressed={adminOpen} onClick={() => setAdminOpen((open) => !open)} className={`h-9 rounded-md px-3 text-sm transition-colors ${adminOpen ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"}`}>Админ</button>}
+            <button type="button" onClick={() => setNewRequestStep("choose")} className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]">
               + Заявка
             </button>
             <button
               type="button"
               aria-label="Открыть профиль сотрудника"
               onClick={() => setActive("profile")}
-              className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold transition-all duration-200 hover:bg-primary hover:text-primary-foreground active:scale-95"
+              className="relative ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-secondary text-xs font-semibold transition-all duration-200 hover:border-foreground/30 active:scale-95"
             >
-              {currentProfile?.initials ?? "NX"}
-              {currentProfile?.is_vip && <span title="VIP" aria-label="VIP" className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-amber-300/40 bg-amber-400/15 text-[9px] text-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.22)]">✦</span>}
+              <ProfileAvatar avatarUrl={currentProfile?.avatar_url} name={currentProfile?.full_name ?? ""} initials={currentProfile?.initials ?? "NX"} className="h-full w-full rounded-[inherit]" fallbackClassName="text-xs" />
+              {currentProfile?.is_vip && <span title="VIP" aria-label="VIP" className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-amber-300/40 bg-background text-[9px] text-amber-200">✦</span>}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-6 py-10">
         {currentProfile?.access_flags_error && (
           <p role="status" className="mb-5 rounded-md border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
             {safeDiagnosticError(currentProfile.access_flags_error)} Основной доступ открыт по активной сессии и профилю; дополнительные access flags будут доступны после синхронизации RPC в Cloud.
           </p>
         )}
+        <Suspense fallback={<TabLoading />}>
         {adminOpen ? <AdminPanel onEmployeeSaved={refreshProfileAfterEmployeeSave} /> : active === "overview" && <Overview go={setActive} />}
+        {!adminOpen && active === "employees" && <EmployeeDirectory />}
         {!adminOpen && active === "tickets" && <Tickets />}
-        {!adminOpen && active === "clients" && <Clients />}
-        {!adminOpen && active === "knowledge" && <Knowledge />}
+        {!adminOpen && active === "knowledge" && <KnowledgeBase />}
         {!adminOpen && active === "notifications" && currentProfile && <AccessNotifications key={accessRequestsVersion} profile={currentProfile} />}
-        {!adminOpen && active === "settings" && <Settings />}
-        {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} />}
+        {!adminOpen && active === "settings" && currentProfile && <SettingsPanel profile={currentProfile} unreadNotifications={unreadNotifications} onOpenNotifications={() => setActive("notifications")} />}
+        {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} onAvatarChanged={refreshAfterAvatarChange} />}
+        </Suspense>
       </main>
 
       <Dialog open={newRequestStep !== "closed"} onOpenChange={(open) => { if (!open) setNewRequestStep("closed"); }}>
@@ -557,7 +542,7 @@ function NexaPrototype() {
           <DialogHeader>
             <DialogTitle>{newRequestStep === "access" ? "Предоставление доступа" : "Новая заявка"}</DialogTitle>
             <DialogDescription>
-              {newRequestStep === "access" ? "Запрос получит владелец NEXA. Уровень изменится только после его одобрения." : "Выберите тип заявки"}
+              {newRequestStep === "access" ? "Запрос получит владелец LUNO DIGITAL. Уровень изменится только после его одобрения." : "Выберите тип заявки"}
             </DialogDescription>
           </DialogHeader>
           {newRequestStep === "choose" && (
@@ -594,9 +579,9 @@ function NexaPrototype() {
       </Dialog>
 
       <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4 text-xs text-muted-foreground">
-          <span>NEXA Helpdesk — визуальный прототип</span>
-          <span>Obsidian Flow · v0.2</span>
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 text-xs text-muted-foreground">
+          <span>© LUNO DIGITAL</span>
+          <span>Рабочее пространство команды</span>
         </div>
       </footer>
     </div>
@@ -631,7 +616,7 @@ function AccessRequestForm({ currentLevel, onSubmitted, onCancel }: { currentLev
     try {
       await submitRequest({ data: { requestedLevel: Number(requestedLevel), reason } });
       setReason("");
-      toast.success("Заявка отправлена владельцу NEXA");
+      toast.success("Заявка отправлена владельцу LUNO DIGITAL");
       onSubmitted();
     } catch (error) {
       toast.error(safeDiagnosticError(error));
@@ -665,19 +650,30 @@ function AccessNotifications({ profile }: { profile: EmployeeProfileData }) {
   const loadRequests = useServerFn(getMyAccessLevelRequests);
   const resolveRequest = useServerFn(reviewAccessLevelRequest);
   const withdrawRequest = useServerFn(cancelAccessLevelRequest);
+  const queryClient = useQueryClient();
   const [requests, setRequests] = useState<AccessRequestItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
   const refresh = async () => {
     setLoading(true);
     try {
       setRequests(await loadRequests());
     } catch (error) {
-      toast.error(`Не удалось загрузить уведомления: ${safeDiagnosticError(error)}`);
+      toast.error(`Не удалось загрузить заявки: ${safeDiagnosticError(error)}`);
     } finally {
       setLoading(false);
+      // Reviewing, cancelling or creating a request creates notifications server-side.
+      void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
     }
+  };
+
+  // Opening a notification linked to an access request brings that request into view.
+  const focusRequest = (requestId: string) => {
+    setHighlightedId(requestId);
+    document.getElementById(`access-request-${requestId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => setHighlightedId((current) => (current === requestId ? null : current)), 2400);
   };
 
   useEffect(() => { void refresh(); }, [loadRequests]);
@@ -704,7 +700,13 @@ function AccessNotifications({ profile }: { profile: EmployeeProfileData }) {
 
   return (
     <div className="animate-fade-in">
-      <SectionTitle title="Уведомления" sub="Заявки на повышение уровня доступа рассматривает только владелец NEXA" />
+      <SectionTitle title="Уведомления" sub="События и действия, которые требуют вашего внимания" />
+      <NotificationsCenter onOpenAccessRequest={focusRequest} />
+
+      <div className="mb-4 mt-10">
+        <h2 className="text-base font-semibold">Заявки на доступ</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Повышение уровня доступа рассматривает только владелец LUNO DIGITAL</p>
+      </div>
       {(profile.access_level ?? 1) < 5 && !loading && !hasPendingOwnRequest && (
         <section className="mb-6 rounded-lg border border-border bg-card p-5">
           <h2 className="mb-3 text-sm font-medium">Запросить уровень доступа</h2>
@@ -713,10 +715,14 @@ function AccessNotifications({ profile }: { profile: EmployeeProfileData }) {
       )}
 
       <div className="space-y-3">
-        {loading && <p className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Загрузка уведомлений…</p>}
-        {!loading && requests.length === 0 && <p className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Уведомлений и заявок пока нет.</p>}
+        {loading && <p className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Загрузка заявок…</p>}
+        {!loading && requests.length === 0 && <p className="rounded-lg border border-border bg-card p-5 text-sm text-muted-foreground">Заявок пока нет.</p>}
         {requests.map((request) => (
-          <article key={request.id} className="rounded-lg border border-border bg-card p-5">
+          <article
+            key={request.id}
+            id={`access-request-${request.id}`}
+            className={`scroll-mt-24 rounded-lg border bg-card p-5 transition-colors duration-700 ${highlightedId === request.id ? "border-primary/50" : "border-border"}`}
+          >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold">{request.notification_title ?? "Заявка на предоставление доступа"}</h2>
@@ -726,7 +732,7 @@ function AccessNotifications({ profile }: { profile: EmployeeProfileData }) {
             </div>
             <p className="mt-3 whitespace-pre-wrap text-sm">{request.reason}</p>
             <p className="mt-3 text-xs text-muted-foreground">Создана: {formatDateTime(request.created_at)}</p>
-            {request.reviewed_at && <p className="mt-1 text-xs text-muted-foreground">Решение принял владелец NEXA{request.reviewer_name ? ` · ${request.reviewer_name}` : ""} · {formatDateTime(request.reviewed_at)}</p>}
+            {request.reviewed_at && <p className="mt-1 text-xs text-muted-foreground">Решение принял владелец LUNO DIGITAL{request.reviewer_name ? ` · ${request.reviewer_name}` : ""} · {formatDateTime(request.reviewed_at)}</p>}
             {request.cancelled_at && <p className="mt-1 text-xs text-muted-foreground">Отменена сотрудником · {formatDateTime(request.cancelled_at)}</p>}
             {request.is_owner_review && request.status === "pending" && (
               <div className="mt-4 flex flex-wrap gap-2">
@@ -743,75 +749,136 @@ function AccessNotifications({ profile }: { profile: EmployeeProfileData }) {
           </article>
         ))}
       </div>
-      <div className="sr-only" aria-hidden="true"><Bell /></div>
     </div>
   );
 }
 
 function SectionTitle({ title, sub }: { title: string; sub: string }) {
   return (
-    <div className="mb-6">
-      <h1 className="text-xl font-semibold">{title}</h1>
-      <p className="mt-1 text-sm text-muted-foreground">{sub}</p>
+    <div className="mb-8">
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      <p className="mt-1.5 text-sm text-muted-foreground">{sub}</p>
     </div>
   );
 }
 
+// Same query key as TaskWorkspace, so both screens share one cached copy of
+// the workspace (tasks of projects the user may access under RLS + profiles).
+const WORKSPACE_QUERY_KEY = ["nexa", "workspace"] as const;
+const ACTIVE_STATUSES = new Set(["todo", "in_progress", "waiting"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type OverviewStat = { label: string; value: string; delta: string; empty?: boolean };
+
 function Overview({ go }: { go: (s: ScreenId) => void }) {
-  const stats = [
-    { label: "Открытые заявки", value: "24", delta: "+3 за сутки" },
-    { label: "Среднее время ответа", value: "7 мин", delta: "−12% к неделе" },
-    { label: "SLA соблюдение", value: "99.4%", delta: "стабильно" },
-    { label: "CSAT", value: "4.8", delta: "+0.2" },
+  const loadWorkspace = useServerFn(getWorkspace);
+  const workspace = useQuery({ queryKey: WORKSPACE_QUERY_KEY, queryFn: () => loadWorkspace() });
+  const data = workspace.data;
+
+  const tasks = data?.tasks ?? [];
+  const now = Date.now();
+  const openTasks = tasks.filter((task) => ACTIVE_STATUSES.has(task.status));
+  const createdLastDay = tasks.filter((task) => now - new Date(task.created_at).getTime() < DAY_MS).length;
+  // Deadline compliance from real fields: completed tasks that had a due date.
+  const completedWithDeadline = tasks.filter((task) => task.status === "done" && task.due_at && task.completed_at);
+  const completedOnTime = completedWithDeadline.filter((task) => new Date(task.completed_at!).getTime() <= new Date(task.due_at!).getTime());
+  const recentTasks = [...tasks].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 4);
+
+  // Team load: active tasks per assignee, as a share of all active assigned tasks.
+  const activeAssigned = openTasks.filter((task) => task.assignee_id);
+  const loadByAssignee = new Map<string, number>();
+  for (const task of activeAssigned) loadByAssignee.set(task.assignee_id!, (loadByAssignee.get(task.assignee_id!) ?? 0) + 1);
+  const teamLoad = [...loadByAssignee.entries()]
+    .map(([id, count]) => ({
+      id,
+      name: data?.profiles.find((profile) => profile.id === id)?.full_name || "Сотрудник",
+      count,
+      share: Math.round((count / activeAssigned.length) * 100),
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ru"))
+    .slice(0, 5);
+
+  const stats: OverviewStat[] = [
+    {
+      label: "Открытые задачи",
+      value: data ? String(openTasks.length) : "—",
+      delta: data ? `+${createdLastDay} за сутки` : "",
+    },
+    { label: "Среднее время ответа", value: "—", delta: "Нет данных: время ответа не фиксируется", empty: true },
+    completedWithDeadline.length > 0
+      ? {
+          label: "Соблюдение сроков",
+          value: `${Math.round((completedOnTime.length / completedWithDeadline.length) * 100)}%`,
+          delta: `${completedOnTime.length} из ${completedWithDeadline.length} завершены в срок`,
+        }
+      : { label: "Соблюдение сроков", value: "—", delta: "Нет данных: нет завершённых задач со сроком", empty: true },
+    { label: "CSAT", value: "—", delta: "Нет данных: оценки клиентов не собираются", empty: true },
   ];
+
   return (
     <div>
-      <SectionTitle title="Обзор" sub="Ключевые метрики службы поддержки за сегодня" />
+      <SectionTitle title="Обзор" sub="Ключевые показатели по задачам, доступным вам" />
+      {workspace.error && (
+        <p role="alert" className="mb-4 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+          Не удалось загрузить данные: {(workspace.error as Error).message}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((s) => (
-          <div key={s.label} className="rounded-lg border border-border bg-card p-4">
+          <div key={s.label} className="rounded-lg border border-border bg-card p-5">
             <div className="text-xs text-muted-foreground">{s.label}</div>
-            <div className="mt-2 text-2xl font-semibold">{s.value}</div>
-            <div className="mt-1 text-xs text-primary">{s.delta}</div>
+            <div className={`mt-3 text-3xl font-semibold tracking-tight ${s.empty ? "text-muted-foreground" : ""}`}>
+              {workspace.isLoading && !s.empty ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-secondary align-middle" /> : s.value}
+            </div>
+            <div className="mt-1.5 text-xs text-muted-foreground">{s.delta}</div>
           </div>
         ))}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <div className="rounded-lg border border-border bg-card p-4 lg:col-span-2">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium">Последние заявки</h2>
-            <button onClick={() => go("tickets")} className="text-xs text-primary hover:underline">
-              Все заявки →
+      <div className="mt-8 grid gap-4 lg:grid-cols-3">
+        <div className="rounded-lg border border-border bg-card p-5 lg:col-span-2">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-medium">Последние задачи</h2>
+            <button type="button" onClick={() => go("tickets")} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+              Открыть задачи →
             </button>
           </div>
-          <div className="divide-y divide-border">
-            {TICKETS.slice(0, 4).map((t) => (
-              <div key={t.id} className="flex items-center gap-3 py-2.5 text-sm">
-                <span className="w-20 font-mono text-xs text-muted-foreground">{t.id}</span>
-                <span className="flex-1 truncate">{t.title}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass(t.status)}`}>{t.status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h2 className="mb-3 text-sm font-medium">Нагрузка команды</h2>
-          {[
-            { name: "А. Соколова", load: 82 },
-            { name: "Д. Орлов", load: 64 },
-            { name: "М. Литвин", load: 41 },
-          ].map((a) => (
-            <div key={a.name} className="mb-3">
-              <div className="mb-1 flex justify-between text-xs">
-                <span>{a.name}</span>
-                <span className="text-muted-foreground">{a.load}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-secondary">
-                <div className="h-1.5 rounded-full bg-primary" style={{ width: `${a.load}%` }} />
-              </div>
+          {workspace.isLoading ? (
+            <p className="py-2.5 text-sm text-muted-foreground">Загрузка задач…</p>
+          ) : recentTasks.length === 0 ? (
+            <p className="py-2.5 text-sm text-muted-foreground">Задач пока нет.</p>
+          ) : (
+            <div className="divide-y divide-border">
+              {recentTasks.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 py-2.5 text-sm">
+                  <span className="w-20 font-mono text-xs text-muted-foreground">#{t.number}</span>
+                  <span className="flex-1 truncate" title={t.title}>{t.title}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass(t.status)}`}>{STATUS_LABEL[t.status] ?? t.status}</span>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+        </div>
+        <div className="rounded-lg border border-border bg-card p-5">
+          <h2 className="mb-4 text-sm font-medium">Нагрузка команды</h2>
+          {workspace.isLoading ? (
+            <p className="text-sm text-muted-foreground">Загрузка…</p>
+          ) : teamLoad.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Нет сотрудников с активными задачами.</p>
+          ) : (
+            teamLoad.map((a) => (
+              <div key={a.id} className="mb-3">
+                <div className="mb-1 flex justify-between gap-3 text-xs">
+                  <span className="truncate" title={a.name}>{a.name}</span>
+                  <span className="shrink-0 text-muted-foreground">{a.count} · {a.share}%</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-secondary">
+                  <div className="h-1.5 rounded-full bg-primary" style={{ width: `${a.share}%` }} />
+                </div>
+              </div>
+            ))
+          )}
+          {teamLoad.length > 0 && <p className="mt-2 text-[11px] text-muted-foreground">Доля активных назначенных задач</p>}
         </div>
       </div>
     </div>
@@ -826,102 +893,8 @@ function Tickets() {
   );
 }
 
-function Clients() {
-  return (
-    <div>
-      <SectionTitle title="Клиенты" sub="Аккаунты, тарифы и открытые обращения" />
-      <div className="grid gap-4 sm:grid-cols-2">
-        {CLIENTS.map((c) => (
-          <div key={c.name} className="rounded-lg border border-border bg-card p-5">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium">{c.name}</h3>
-              <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">{c.plan}</span>
-            </div>
-            <div className="mt-4 flex gap-6 text-sm">
-              <div>
-                <div className="text-xs text-muted-foreground">Открытые заявки</div>
-                <div className="mt-0.5 text-lg font-semibold text-primary">{c.open}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">SLA</div>
-                <div className="mt-0.5 text-lg font-semibold">{c.sla}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Knowledge() {
-  return (
-    <div>
-      <SectionTitle title="База знаний" sub="Статьи для клиентов и агентов" />
-      <div className="divide-y divide-border rounded-lg border border-border bg-card">
-        {ARTICLES.map((a) => (
-          <div key={a.title} className="flex items-center gap-4 px-5 py-4 hover:bg-secondary/50">
-            <div className="flex-1">
-              <div className="text-sm font-medium">{a.title}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">Обновлено: {a.updated}</div>
-            </div>
-            <div className="text-xs text-muted-foreground">{a.views} просмотров</div>
-            <button className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground">
-              Открыть
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Settings() {
-  const [email, setEmail] = useState(true);
-  const [slack, setSlack] = useState(false);
-  const [auto, setAuto] = useState(true);
-  const rows = [
-    { label: "Email-уведомления", desc: "Отправлять клиентам статусы заявок", value: email, set: setEmail },
-    { label: "Slack-интеграция", desc: "Дублировать критические заявки в канал", value: slack, set: setSlack },
-    { label: "Автоназначение", desc: "Распределять новые заявки по нагрузке", value: auto, set: setAuto },
-  ];
-  return (
-    <div>
-      <SectionTitle title="Настройки" sub="Каналы и автоматизация рабочего пространства" />
-      <div className="divide-y divide-border rounded-lg border border-border bg-card">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-center justify-between px-5 py-4">
-            <div>
-              <div className="text-sm font-medium">{r.label}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{r.desc}</div>
-            </div>
-            <button
-              onClick={() => r.set(!r.value)}
-              aria-pressed={r.value}
-              className={`relative h-6 w-11 rounded-full transition-colors ${r.value ? "bg-primary" : "bg-secondary"}`}
-            >
-              <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-foreground transition-all ${
-                  r.value ? "left-[22px]" : "left-0.5"
-                }`}
-              />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
+function EmployeeProfile({ employee, onAvatarChanged }: { employee: EmployeeProfileData; onAvatarChanged: () => Promise<void> }) {
   const [contactCopied, setContactCopied] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-  const getMailbox = useServerFn(getMyCorporateMailbox);
-  const [mailbox, setMailbox] = useState<{ email: string; status: string; provider: string | null; created_at: string } | null>(null);
-
-  useEffect(() => {
-    getMailbox().then((value) => setMailbox(value)).catch(() => setMailbox(null));
-  }, [getMailbox]);
 
   const copyContact = async () => {
     if (!employee.email) return;
@@ -930,173 +903,87 @@ function EmployeeProfile({ employee }: { employee: EmployeeProfileData }) {
     window.setTimeout(() => setContactCopied(false), 1400);
   };
 
-  const signOut = async () => {
-    setSigningOut(true);
-    try {
-      await signOutCurrentUser();
-    } catch (error) {
-      toast.error((error as Error).message);
-    } finally {
-      setSigningOut(false);
-    }
-  };
-
-  const presenceLabel: Record<string, string> = {
-    online: "На связи",
-    away: "Отошёл",
-    offline: "Не в сети",
-  };
   const joinedAt = employee.created_at
     ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).format(new Date(employee.created_at))
-    : "Не указана";
+    : null;
   const director = employee.role === "director" || employee.position?.trim().toLocaleLowerCase("ru-RU") === "директор";
+  const position = (director ? employee.position || "Директор" : employee.position) || null;
+  const presence = PRESENCE_LABEL[employee.presence] ?? (employee.presence || null);
+  const online = employee.presence === "online";
+  // Contacts list only fields that actually have a value the viewer may see.
+  const levelLabel = employee.access_level !== null ? `Level ${employee.access_level}` : "—";
+  const email = realValue(employee.email);
+  const phone = realPhone(employee.phone);
+  const location = realValue(employee.location);
 
   return (
-    <div className="animate-fade-in">
-      <section className="border-b border-border pb-7">
-        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+    <div className="animate-fade-in space-y-4">
+      <section className="rounded-xl border border-border bg-card px-6 py-5">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-5">
-            <Avatar className="h-20 w-20 rounded-lg border border-border bg-secondary shadow-sm sm:h-24 sm:w-24">
-              {employee.avatar_url && <AvatarImage src={employee.avatar_url} alt={employee.full_name} />}
-              <AvatarFallback className="rounded-lg bg-secondary text-2xl font-semibold text-primary">
-                {employee.initials}
-              </AvatarFallback>
-            </Avatar>
+            <EditableProfileAvatar avatarUrl={employee.avatar_url} name={employee.full_name} initials={employee.initials} onUploaded={onAvatarChanged} />
             <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-medium text-primary">
-                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                  {presenceLabel[employee.presence] ?? (employee.presence || "Статус не указан")}
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{employee.full_name}</h1>
+                {director && <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground">Директор</span>}
+                {employee.is_vip && <VipBadge />}
+              </div>
+              {(position || employee.department) && (
+                <p className="mt-1 text-sm text-muted-foreground sm:text-base">{[position, employee.department].filter(Boolean).join(" · ")}</p>
+              )}
+              {presence && (
+                <span className="mt-1.5 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full ${online ? "bg-emerald-400" : "bg-muted-foreground/60"}`} />
+                  {presence}
                 </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-2xl font-semibold sm:text-3xl">{employee.full_name}</h1>
-                {director && <span className="rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Директор</span>}
-                {employee.is_vip && <span className="inline-flex items-center rounded-full border border-amber-300/30 bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.16)]">✦ VIP</span>}
-              </div>
-              <p className="mt-1.5 text-sm text-muted-foreground sm:text-base">
-                {(director ? employee.position || "Директор" : employee.position) || "Должность не указана"} · {employee.department || "Отдел не указан"}
-              </p>
+              )}
             </div>
           </div>
-          <div className="flex shrink-0 gap-2">
-            <Button variant="outline" onClick={copyContact} disabled={!employee.email} className="active:scale-[0.98]">
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button variant="outline" onClick={() => void copyContact()} disabled={!email} className="active:scale-[0.98]">
               {contactCopied ? <Check /> : <AtSign />}
-              {contactCopied ? "Контакт скопирован" : "Скопировать email"}
+              {contactCopied ? "Скопировано" : "Скопировать email"}
             </Button>
             <Button className="active:scale-[0.98]">
               <MessageSquare />
               Написать
             </Button>
-            <Button variant="outline" onClick={() => void signOut()} disabled={signingOut} className="active:scale-[0.98]">
-              <LogOut />
-              {signingOut ? "Выходим…" : "Выйти"}
-            </Button>
           </div>
         </div>
       </section>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="min-w-0 space-y-6">
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Рабочие показатели</h2>
-            <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-card xl:grid-cols-4">
-              {[
-                { value: "—", label: "Активных задач", note: "Статистика профиля пока не подключена" },
-                { value: "—", label: "Решено за месяц", note: "Статистика профиля пока не подключена" },
-                { value: "—", label: "Средний ответ", note: "Статистика профиля пока не подключена" },
-                { value: "—", label: "Оценка клиентов", note: "Статистика профиля пока не подключена" },
-              ].map((item, index) => (
-                <div
-                  key={item.label}
-                  className={`p-4 transition-colors duration-200 hover:bg-secondary/40 ${
-                    index % 2 ? "border-l border-border" : ""
-                  } ${index > 1 ? "border-t border-border xl:border-t-0" : ""} ${
-                    index > 0 ? "xl:border-l xl:border-border" : ""
-                  }`}
-                >
-                  <div className="text-2xl font-semibold">{item.value}</div>
-                  <div className="mt-1 text-xs font-medium">{item.label}</div>
-                  <div className="mt-2 text-[11px] text-muted-foreground">{item.note}</div>
-                </div>
-              ))}
-            </div>
-          </section>
+      <div className="grid gap-4 md:grid-cols-2">
+        <ProfileCard title="Доступ">
+          <div className="mb-4 flex items-baseline gap-2">
+            <span className="text-4xl font-semibold tracking-tight">{levelLabel}</span>
+            <span className="text-xs text-muted-foreground">уровень доступа</span>
+          </div>
+          <dl className="divide-y divide-border border-t border-border pt-2.5">
+            <ProfileField label="Роль" value={employee.role ? ROLE_LABEL[employee.role] ?? employee.role : "Не указана"} muted={!employee.role} />
+            <ProfileField
+              label="Статус"
+              value={<span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${employee.is_active ? "bg-emerald-400" : "bg-destructive"}`} />{employee.is_active ? "Активен" : "Неактивен"}</span>}
+            />
+            <ProfileField label="VIP" value={employee.is_vip ? "Да" : "Нет"} muted={!employee.is_vip} />
+          </dl>
+        </ProfileCard>
 
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Текущая активность</h2>
-            <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
-              Данные активности для профиля пока не подключены.
-            </div>
-          </section>
-
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Рабочая нагрузка</h2>
-            <div className="rounded-lg border border-border bg-card p-5">
-              <div className="flex items-end justify-between gap-4">
-                <div>
-                  <div className="text-2xl font-semibold">—</div>
-                  <p className="mt-1 text-xs text-muted-foreground">Расчёт нагрузки по задачам пока не подключён.</p>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <aside className="space-y-6">
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Корпоративная почта</h2>
-            <div className="rounded-lg border border-border bg-card p-4">
-              {mailbox ? <>
-                <div className="break-all text-sm font-medium">{mailbox.email}</div>
-                <div className="mt-2 text-xs text-muted-foreground">Статус: {{ pending: "Не подключена", active: "Активна", suspended: "Приостановлена", disabled: "Отключена", error: "Ошибка" }[mailbox.status] ?? mailbox.status}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Провайдер: {mailbox.provider ?? "Не настроен"}</div>
-                {mailbox.status === "pending" && <p className="mt-2 text-xs text-muted-foreground">Адрес зарезервирован в NEXA. Реальный почтовый ящик пока не создан.</p>}
-              </> : <p className="text-xs text-muted-foreground">Корпоративный адрес пока не назначен.</p>}
-            </div>
-          </section>
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Контакты</h2>
-            <div className="space-y-1 rounded-lg border border-border bg-card p-3">
-              {[
-                { icon: Mail, label: "Почта", value: employee.private_fields_allowed ? employee.email || "Не указана" : "Недоступна по RBAC" },
-                ...(employee.private_fields_allowed ? [
-                  { icon: Phone, label: "Телефон", value: employee.phone || "Не указан" },
-                  { icon: MapPin, label: "Локация", value: employee.location || "Не указана" },
-                ] : []),
-              ].map(({ icon: Icon, label, value }) => (
-                <div key={label} className="flex gap-3 rounded-md p-2 transition-colors hover:bg-secondary/45">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <div className="text-[11px] text-muted-foreground">{label}</div>
-                    <div className="mt-0.5 break-words text-xs">{value}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section>
-            <h2 className="mb-3 text-sm font-medium">Рабочая информация</h2>
-            <div className="divide-y divide-border rounded-lg border border-border bg-card px-4">
-              {[
-                { icon: BriefcaseBusiness, label: "Должность", value: employee.position || "Не указана" },
-                { icon: Building2, label: "Отдел", value: employee.department || "Не указан" },
-                { icon: CalendarDays, label: "Профиль создан", value: joinedAt },
-                ...(employee.private_fields_allowed ? [{ icon: ShieldCheck, label: "Уровень доступа", value: employee.access_level ? `Уровень ${employee.access_level}` : "Не указан" }] : []),
-              ].map(({ icon: Icon, label, value }) => (
-                <div key={label} className="flex gap-3 py-3.5">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div>
-                    <div className="text-[11px] text-muted-foreground">{label}</div>
-                    <div className="mt-0.5 text-xs font-medium">{value}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </aside>
+        <ProfileCard title="Контакты">
+          <dl className="divide-y divide-border">
+            <ProfileField label="Email" value={email ?? "Не указан"} muted={!email} />
+            {employee.private_fields_allowed && <ProfileField label="Телефон" value={phone ?? "Не указан"} muted={!phone} />}
+            {employee.private_fields_allowed && <ProfileField label="Локация" value={location ?? "Не указана"} muted={!location} />}
+          </dl>
+        </ProfileCard>
       </div>
+
+      <ProfileCard title="Рабочая информация">
+        <dl className="divide-y divide-border">
+          <ProfileField label="Должность" value={position ?? "Не указана"} muted={!position} />
+          <ProfileField label="Отдел" value={employee.department || "Не указан"} muted={!employee.department} />
+          <ProfileField label="Профиль создан" value={joinedAt ?? "Не указана"} muted={!joinedAt} />
+        </dl>
+      </ProfileCard>
     </div>
   );
 }

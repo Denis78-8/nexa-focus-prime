@@ -16,7 +16,7 @@ import {
 import { PASSWORD_MAX_LENGTH, PASSWORD_RULES, passwordMeetsPolicy } from "@/lib/password-policy";
 
 export const Route = createFileRoute("/change-password")({
-  head: () => ({ meta: [{ title: "Смена пароля — NEXA" }] }),
+  head: () => ({ meta: [{ title: "Смена пароля — LUNO DIGITAL" }] }),
   component: ChangePasswordPage,
 });
 
@@ -64,8 +64,11 @@ function ChangePasswordPage() {
       await completePasswordChange(newPassword, confirmPassword);
       setNewPassword("");
       setConfirmPassword("");
-      toast.success("Пароль изменён");
-      await navigate({ to: "/" });
+      // All sessions were revoked server-side (SEC-001); drop the local copy
+      // and sign in again with the new password.
+      await supabase.auth.signOut({ scope: "local" });
+      toast.success("Пароль изменён. Войдите с новым паролем.");
+      await navigate({ to: "/auth" });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Не удалось изменить пароль");
       const fresh = await loadState().catch(() => null);

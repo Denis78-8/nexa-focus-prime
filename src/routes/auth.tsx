@@ -1,19 +1,20 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useAmbientIntensity } from "@/components/nexa/AmbientFlowBackground";
+import { AuthBackground } from "@/components/nexa/AuthBackground";
+import { BrandLogo } from "@/components/nexa/BrandLogo";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Вход — NEXA Obsidian Flow" },
-      { name: "description", content: "Вход в рабочее пространство NEXA: задачи, проекты и учёт времени." },
-      { property: "og:title", content: "Вход — NEXA Obsidian Flow" },
-      { property: "og:description", content: "Вход в рабочее пространство NEXA." },
+      { title: "Вход — LUNO DIGITAL" },
+      { name: "description", content: "Вход в рабочее пространство LUNO DIGITAL: задачи, проекты и учёт времени." },
+      { property: "og:title", content: "Вход — LUNO DIGITAL" },
+      { property: "og:description", content: "Вход в рабочее пространство LUNO DIGITAL." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -22,7 +23,6 @@ export const Route = createFileRoute("/auth")({
 });
 
 function AuthPage() {
-  useAmbientIntensity("calm");
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -72,14 +72,12 @@ function AuthPage() {
   }
 
   return (
-    <div className="dark flex min-h-screen items-center justify-center px-6 text-foreground">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6">
-        <div className="mb-6 flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">N</div>
-          <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-wide">NEXA</div>
-            <div className="text-[11px] text-muted-foreground">Вход в рабочее пространство</div>
-          </div>
+    <div className="dark relative flex min-h-dvh items-center justify-center px-6 text-foreground">
+      <AuthBackground />
+      <div className="relative z-10 w-full max-w-sm rounded-lg border border-border bg-card/95 p-6 shadow-[0_24px_80px_-24px_oklch(0_0_0/0.7)]">
+        <div className="mb-6 flex flex-col items-center gap-2 text-center">
+          <BrandLogo height={64} />
+          <div className="text-xs text-muted-foreground">Вход в рабочее пространство</div>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
@@ -94,10 +92,7 @@ function AuthPage() {
             {busy ? "Подождите…" : "Войти"}
           </Button>
         </form>
-        <div className="mt-4 flex justify-between text-xs text-muted-foreground">
-          <span>Учётные записи выдаёт владелец NEXA</span>
-          <Link to="/" className="hover:text-foreground">На главную</Link>
-        </div>
+        <p className="mt-4 text-center text-xs text-muted-foreground">Учётные записи выдаёт владелец LUNO DIGITAL</p>
       </div>
     </div>
   );

@@ -1,10 +1,12 @@
+import { createUuid } from "@/lib/uuid";
+
 // Идентификатор текущей пользовательской сессии (вкладки). Пишется в интервалы таймера и историю.
 export function getNexaSessionId(): string {
   if (typeof window === "undefined") return "ssr-session";
   const key = "nexa-session-id";
   let id = window.sessionStorage.getItem(key);
   if (!id) {
-    id = crypto.randomUUID();
+    id = createUuid();
     window.sessionStorage.setItem(key, id);
   }
   return id;
