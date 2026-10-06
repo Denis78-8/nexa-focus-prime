@@ -15,3 +15,6 @@ verify_jwt = true
 
 [functions.complete-password-change]
 verify_jwt = true
+
+[functions.admin-set-employee-password]
+verify_jwt = true

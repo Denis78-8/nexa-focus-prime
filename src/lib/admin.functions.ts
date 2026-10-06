@@ -13,28 +13,14 @@ async function requirePermission(context: { supabase: unknown; userId: string },
   if (!data) throw new Error("Недостаточно прав");
 }
 
-async function isOwner(context: { supabase: unknown; userId: string }) {
-  // Owner-only operations are checked against the protected registry after
-  // requireSupabaseAuth has verified this request's user identity.
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: owner, error: ownerError } = await (supabaseAdmin as unknown as { from: (table: string) => any }).from("nexa_owners").select("user_id").eq("user_id", context.userId).maybeSingle();
-  fail(ownerError);
-  return Boolean(owner);
-}
+type RpcClient = { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }> };
+const rpcClient = (context: { supabase: unknown }) => context.supabase as RpcClient;
 
-async function updateAuthUserPassword(userId: string, password: string) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const admin = supabaseAdmin as unknown as {
-    auth: { admin: {
-      getUserById: (id: string) => Promise<{ data: { user: { id: string } | null }; error: { message: string } | null }>;
-      updateUserById: (id: string, attributes: { password: string }) => Promise<{ error: { message: string } | null }>;
-    } };
-  };
-  const { data, error } = await admin.auth.admin.getUserById(userId);
+async function isOwner(context: { supabase: unknown }) {
+  // Decided inside the RPC from auth.uid() and nexa_owners; no id is passed.
+  const { data, error } = await rpcClient(context).rpc("current_user_is_owner", {});
   fail(error);
-  if (!data.user || data.user.id !== userId) throw new Error("Auth-пользователь не найден");
-  const { error: updateError } = await admin.auth.admin.updateUserById(userId, { password });
-  fail(updateError);
+  return data === true;
 }
 
 export const getAdminAccess = createServerFn({ method: "GET" })
@@ -88,20 +74,23 @@ export const updateEmployeePassword = createServerFn({ method: "POST" })
   .inputValidator((d: z.input<typeof employeePasswordInput>) => employeePasswordInput.parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, "admin.access");
-    if (!(await isOwner(context))) throw new Error("Менять пароли сотрудников может только владелец NEXA");
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-
-    const { data: profile, error: profileError } = await admin.from("profiles")
-      .select("id,is_active")
-      .eq("id", data.userId)
-      .maybeSingle();
-    fail(profileError);
-    if (!profile || profile.id !== data.userId) throw new Error("Сотрудник с таким UUID не найден");
-    if (!profile.is_active) throw new Error("Нельзя изменить пароль отключённой учётной записи");
-
-    await updateAuthUserPassword(data.userId, data.newPassword);
+    if (!(await isOwner(context))) throw new Error("Менять пароли сотрудников может только владелец LUNO DIGITAL");
+    // The Auth Admin API call runs in the admin-set-employee-password Edge
+    // Function (Cloud holds the service-role key). It is invoked with this
+    // user's JWT and re-checks owner rights itself; the password is not logged.
+    const client = context.supabase as unknown as {
+      functions: { invoke: (name: string, options: { body: Record<string, unknown> }) => Promise<{ data: unknown; error: (Error & { context?: Response }) | null }> };
+    };
+    const { data: result, error } = await client.functions.invoke("admin-set-employee-password", {
+      body: { userId: data.userId, newPassword: data.newPassword, confirmPassword: data.confirmPassword },
+    });
+    if (error) {
+      const payload = await error.context?.json().catch(() => null) as { error?: unknown } | null | undefined;
+      if (typeof payload?.error === "string") throw new Error(payload.error);
+      if (error.context?.status === 404) throw new Error("Серверная функция ещё не развёрнута в Cloud");
+      throw new Error("Не удалось изменить пароль сотрудника");
+    }
+    if (!result || typeof result !== "object" || (result as { ok?: unknown }).ok !== true) throw new Error("Сервер вернул некорректный ответ");
     return { ok: true };
   });
 
@@ -152,29 +141,17 @@ export const updateEmployee = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-async function availableCorporateAddress(fullName: string, admin: { from: (table: string) => any }, forUserId?: string) {
-  const { generateCorporateLocalPart, getCorporateMailDomain } = await import("@/lib/corporate-mail.server");
+type CorporateAddress = { email: string; localPart: string; domain: string };
+
+// The local part is derived from the full name here (transliteration); the
+// suggest_corporate_email RPC picks a free suffix on the canonical domain
+// stored in the database, under mailboxes.manage.
+async function availableCorporateAddress(context: { supabase: unknown }, fullName: string, forUserId?: string) {
+  const { generateCorporateLocalPart } = await import("@/lib/corporate-mail.server");
   const base = generateCorporateLocalPart(fullName);
-  const domain = getCorporateMailDomain();
-  const [mailboxResult, profileResult] = await Promise.all([
-    admin.from("corporate_mailboxes").select("email"),
-    admin.from("profiles").select("id,email").not("email", "is", null),
-  ]);
-  fail(mailboxResult.error);
-  fail(profileResult.error);
-  const occupied = new Set<string>([
-    ...(mailboxResult.data ?? []).map((row: { email: string }) => row.email.toLowerCase()),
-    ...(profileResult.data ?? [])
-      .filter((row: { id: string }) => row.id !== forUserId)
-      .map((row: { email: string }) => row.email.toLowerCase()),
-  ]);
-  for (let suffix = 1; suffix <= 10000; suffix += 1) {
-    const marker = suffix === 1 ? "" : String(suffix);
-    const localPart = `${base.slice(0, 64 - marker.length)}${marker}`;
-    const email = `${localPart}@${domain}`;
-    if (!occupied.has(email)) return { email, localPart, domain };
-  }
-  throw new Error("Не удалось подобрать свободный адрес корпоративной почты");
+  const { data, error } = await rpcClient(context).rpc("suggest_corporate_email", { _local_part: base, _for_user: forUserId ?? null });
+  fail(error);
+  return { base, address: data as CorporateAddress };
 }
 
 export const suggestCorporateEmail = createServerFn({ method: "POST" })
@@ -182,69 +159,53 @@ export const suggestCorporateEmail = createServerFn({ method: "POST" })
   .inputValidator((d: { fullName: string; userId?: string }) => z.object({ fullName: z.string().trim().min(2).max(120), userId: z.string().uuid().optional() }).parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, "mailboxes.manage");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-    return availableCorporateAddress(data.fullName, admin, data.userId);
+    const { address } = await availableCorporateAddress(context, data.fullName, data.userId);
+    return address;
   });
+
+type ReservedMailbox = { id: string; user_id: string; email: string; local_part: string; domain: string; status: string; provider: string | null; is_primary: boolean; created_at: string };
 
 export const reserveCorporateMailbox = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { userId: string; email: string }) => z.object({ userId: z.string().uuid(), email: z.string().trim().email().max(254).toLowerCase() }).parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, "mailboxes.manage");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-    const { data: profile, error: profileError } = await admin.from("profiles").select("id,full_name,is_active").eq("id", data.userId).maybeSingle();
-    fail(profileError);
-    if (!profile) throw new Error("Сотрудник не найден");
-    if (!profile.is_active) throw new Error("Нельзя зарезервировать адрес для отключённого сотрудника");
-    const { email, localPart, domain } = await availableCorporateAddress(profile.full_name, admin, data.userId);
-    if (email !== data.email) throw new Error(`Предложение уже изменилось. Обновите адрес: ${email}`);
+    const client = rpcClient(context);
+    const { data: target, error: targetError } = await client.rpc("get_mailbox_reservation_target", { _user_id: data.userId });
+    fail(targetError);
+    const profile = target as { fullName: string; isActive: boolean };
+    if (!profile.isActive) throw new Error("Нельзя зарезервировать адрес для отключённого сотрудника");
+    const { base, address } = await availableCorporateAddress(context, profile.fullName, data.userId);
+    if (address.email !== data.email) throw new Error(`Предложение уже изменилось. Обновите адрес: ${address.email}`);
     const { isValidCorporateEmail, getCorporateMailProvider } = await import("@/lib/corporate-mail.server");
-    if (!isValidCorporateEmail(email, domain)) throw new Error("Адрес не прошёл серверную проверку формата");
-    const { data: existing, error: existingError } = await admin.from("corporate_mailboxes").select("id").eq("user_id", data.userId).eq("is_primary", true).maybeSingle();
-    fail(existingError);
-    if (existing) throw new Error("У сотрудника уже есть основной корпоративный адрес");
+    if (!isValidCorporateEmail(address.email, address.domain)) throw new Error("Адрес не прошёл серверную проверку формата");
 
-    const { data: mailbox, error: insertError } = await admin.from("corporate_mailboxes").insert({
-      user_id: data.userId, email, local_part: localPart, domain, status: "pending", provider: null,
-      provider_user_id: null, is_primary: true, created_by: context.userId,
-      metadata: { provisioning: "not_started" },
-    }).select("id,user_id,email,local_part,domain,status,provider,is_primary,created_at").single();
-    fail(insertError);
+    // The RPC re-checks permission, the employee, the free address and the
+    // single primary mailbox, then inserts the pending reservation.
+    const { data: reserved, error: reserveError } = await client.rpc("reserve_corporate_mailbox", {
+      _user_id: data.userId, _email: address.email, _local_part: base,
+    });
+    fail(reserveError);
+    const mailbox = reserved as ReservedMailbox;
 
     const provider = getCorporateMailProvider();
     let providerResult: Awaited<ReturnType<typeof provider.createMailbox>>;
     try {
-      providerResult = await provider.createMailbox({ email, displayName: profile.full_name });
+      providerResult = await provider.createMailbox({ email: mailbox.email, displayName: profile.fullName });
     } catch {
       providerResult = { ok: false, code: "provider_error" };
     }
-    const audit = (action: "mailbox_created" | "mailbox_provision_failed", metadata: Record<string, unknown>) =>
-      admin.from("mailbox_audit_events").insert({ mailbox_id: mailbox.id, action, actor_user_id: context.userId, target_user_id: data.userId, metadata });
-    if (!providerResult.ok) {
-      const { error: createdAuditError } = await audit("mailbox_created", { status: "pending", reservationOnly: true, realMailboxCreated: false });
-      fail(createdAuditError);
-      const { error: failureAuditError } = await audit("mailbox_provision_failed", { code: providerResult.code, realMailboxCreated: false });
-      fail(failureAuditError);
-      if (providerResult.code === "provider_error") {
-        const { error: statusError } = await admin.from("corporate_mailboxes").update({ status: "error", metadata: { provisioning: "error" } }).eq("id", mailbox.id);
-        fail(statusError);
-      } else {
-        const { error: statusError } = await admin.from("corporate_mailboxes").update({ metadata: { provisioning: "provider_not_configured" } }).eq("id", mailbox.id);
-        fail(statusError);
-      }
-      return { mailbox: providerResult.code === "provider_error" ? { ...mailbox, status: "error" } : mailbox, provisioning: providerResult.code };
+    if (providerResult.ok) {
+      // Unreachable while nullCorporateMailProvider is the only provider.
+      // Activation will be added as a server-side Cloud step together with a
+      // real provider; the reservation stays pending and nothing is activated.
+      throw new Error(`Адрес ${mailbox.email} зарезервирован. Активация ящика провайдером пока не поддерживается.`);
     }
-
-    const { error: activateError } = await admin.from("corporate_mailboxes").update({
-      status: "active", provider: providerResult.value.provider, provider_user_id: providerResult.value.providerUserId,
-      metadata: { provisioning: "active" },
-    }).eq("id", mailbox.id);
-    fail(activateError);
-    const { error: createdAuditError } = await audit("mailbox_created", { status: "active", provider: providerResult.value.provider, realMailboxCreated: true });
-    fail(createdAuditError);
-    return { mailbox: { ...mailbox, status: "active", provider: providerResult.value.provider }, provisioning: "active" as const };
+    // The reservation audit event was written by reserve_corporate_mailbox;
+    // the RPC records the failure event and the final status.
+    const { error: finishError } = await client.rpc("finish_corporate_mailbox_provisioning", { _mailbox_id: mailbox.id, _result: providerResult.code });
+    fail(finishError);
+    return { mailbox: providerResult.code === "provider_error" ? { ...mailbox, status: "error" } : mailbox, provisioning: providerResult.code };
   });
 
 export const getMyCorporateMailbox = createServerFn({ method: "GET" })
@@ -264,26 +225,12 @@ export const updatePermissionMatrix = createServerFn({ method: "POST" })
   .inputValidator((d: z.input<typeof matrixInput>) => matrixInput.parse(d))
   .handler(async ({ data, context }) => {
     await requirePermission(context, data.kind === "role" ? "roles.manage" : "access_levels.manage");
-    if (data.kind === "level" && data.subject === "5" && data.permission === "admin.access" && !data.enabled) {
-      throw new Error("Доступ уровня 5 к Admin Panel обязателен и не может быть отключён");
-    }
-    const owner = await isOwner(context);
-    const protectedPermissions = ["admin.access", "employees.manage", "roles.manage", "access_levels.manage", "vip.manage", "system.manage", "mailboxes.manage"];
-    if (data.kind === "role" && data.subject === "admin") throw new Error("Матрица admin защищена");
-    if (!owner && (protectedPermissions.includes(data.permission) || data.kind === "role" && data.subject === "director")) throw new Error("Эту матрицу может менять только владелец NEXA");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const admin = supabaseAdmin as unknown as { from: (table: string) => any };
-    const table = data.kind === "role" ? "role_permissions" : "access_level_permissions";
-    const key = data.kind === "role" ? { role: data.subject, permission_key: data.permission } : { access_level: Number(data.subject), permission_key: data.permission };
-    if (data.enabled) {
-      const { error } = await admin.from(table).upsert(key, { onConflict: data.kind === "role" ? "role,permission_key" : "access_level,permission_key" });
-      fail(error);
-    } else {
-      let query = admin.from(table).delete().eq("permission_key", data.permission);
-      query = data.kind === "role" ? query.eq("role", data.subject) : query.eq("access_level", Number(data.subject));
-      const { error } = await query;
-      fail(error);
-    }
+    // SEC-002: owner-only. The update_permission_matrix RPC checks the
+    // permission, the nexa_owners registry and the protected entries itself.
+    const { error } = await rpcClient(context).rpc("update_permission_matrix", {
+      _kind: data.kind, _subject: data.subject, _permission: data.permission, _enabled: data.enabled,
+    });
+    fail(error);
     return { ok: true };
   });
 
@@ -291,7 +238,8 @@ export const getSystemStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await requirePermission(context, "system.manage");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await (supabaseAdmin as unknown as { from: (table: string) => any }).from("profiles").select("id", { count: "exact", head: true });
-    return { database: error ? "error" : "ok", checkedAt: new Date().toISOString(), version: "NEXA Helpdesk · v0.2" };
+    // Minimal health check: the RPC only confirms the database answers.
+    const { data, error } = await rpcClient(context).rpc("get_system_status", {});
+    const ok = !error && (data as { database?: unknown } | null)?.database === "ok";
+    return { database: ok ? "ok" : "error", checkedAt: new Date().toISOString(), version: "LUNO DIGITAL" };
   });
