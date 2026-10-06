@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Timer, Plus, Users } from "lucide-react";
+import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Plus, Users, ChevronLeft } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, type Transition } from "motion/react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -22,6 +22,7 @@ import {
   updateTask,
 } from "@/lib/tasks.functions";
 import { formatDuration, getNexaSessionId } from "@/lib/nexa-session";
+import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 
 type Action = "start" | "pause" | "resume" | "wait" | "complete" | "reopen";
 
@@ -52,13 +53,6 @@ const fadeUp = { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, e
 
 function initialsOf(name: string) {
   return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("ru-RU") || "—";
-}
-
-function statusTone(s: string) {
-  if (s === "in_progress") return "bg-primary/15 text-primary";
-  if (s === "waiting") return "bg-secondary text-foreground";
-  if (s === "done") return "bg-secondary text-muted-foreground";
-  return "bg-secondary text-muted-foreground";
 }
 
 function useNow(active: boolean) {
@@ -134,116 +128,236 @@ function Workspace() {
   const selected = data.tasks.find((t) => t.id === taskId) ?? null;
 
   const filterKey = `${projectId ?? "none"}:${mineOnly ? "mine" : "all"}`;
+  const openTotal = data.tasks.filter((t) => t.status !== "done").length;
+  const selectProject = (id: string) => {
+    setProjectId(id);
+    setTaskId(null);
+    setComposerOpen(false);
+  };
 
   return (
     <MotionConfig reducedMotion="user">
       <div>
+        {/* Page header: title, scope summary and the one global action. */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Задачи</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Рабочее пространство</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {data.projects.length > 0
+                ? `${data.projects.length} ${plural(data.projects.length, "проект", "проекта", "проектов")} · ${openTotal} ${plural(openTotal, "открытая задача", "открытые задачи", "открытых задач")}`
+                : "Рабочее пространство"}
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {data.projects.length > 0 && (
-              <select
-                aria-label="Проект"
-                value={projectId ?? ""}
-                onChange={(e) => {
-                  setProjectId(e.target.value);
-                  setTaskId(null);
-                }}
-                title={project ? `${project.code} · ${project.name}` : undefined}
-                className="h-9 max-w-[14rem] truncate rounded-md border border-border bg-card/60 px-2.5 text-sm"
-              >
-                {data.projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
-                ))}
-              </select>
-            )}
-            <div className="relative flex h-9 items-center rounded-md border border-border bg-card/60 p-0.5">
-              {([
-                [false, "Все задачи"],
-                [true, "Мои задачи"],
-              ] as const).map(([mine, label]) => (
-                <button
-                  key={label}
-                  type="button"
-                  aria-pressed={mineOnly === mine}
-                  onClick={() => {
-                    setMineOnly(mine);
-                    setTaskId(null);
-                  }}
-                  className={`relative h-full rounded px-3 text-sm transition-colors ${mineOnly === mine ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {mineOnly === mine && <motion.span layoutId="task-filter-pill" transition={SOFT_SPRING} className="absolute inset-0 rounded bg-secondary" />}
-                  <span className="relative">{label}</span>
-                </button>
-              ))}
-            </div>
-            {project && (
-              <Button size="sm" className="h-9 active:scale-[0.97]" aria-expanded={composerOpen} onClick={() => setComposerOpen((open) => !open)}>
-                <Plus className="h-4 w-4" />
-                Задача
-              </Button>
-            )}
-            <NewProject onCreated={(id) => setProjectId(id)} />
-          </div>
+          <NewProject onCreated={selectProject} />
         </div>
 
         {!project ? (
-          <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-            Вы пока не участник ни одного проекта. Создайте проект (доступно администратору и менеджеру) или попросите руководителя добавить вас.
+          <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-5 py-4 text-sm">
+            <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div>
+              <div className="font-medium">Проектов пока нет</div>
+              <p className="mt-0.5 text-muted-foreground">Создайте проект (доступно администратору и менеджеру) или попросите руководителя добавить вас в существующий.</p>
+            </div>
           </div>
         ) : (
-          <div className="grid overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.35fr)]">
-            <div className="flex min-w-0 flex-col border-b border-border lg:border-b-0 lg:border-r">
-              <div className="flex items-center justify-between px-4 pb-2 pt-4">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{project.code} · {project.name}</span>
-                <span className="text-xs text-muted-foreground">{tasks.length}</span>
+          <div className="grid overflow-clip rounded-xl border border-border bg-card lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,0.92fr)_minmax(0,1.08fr)]">
+            {/* 1. Projects */}
+            <aside aria-label="Проекты" className={`flex-col border-border bg-background/40 lg:flex lg:border-r xl:row-span-1 lg:row-span-2 ${selected ? "hidden" : "flex"}`}>
+              <div className="flex flex-1 flex-col xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:flex-none">
+              <div className="hidden px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-foreground/55 lg:block">Проекты · {data.projects.length}</div>
+              {/* Mobile: compact project selector */}
+              <div className="border-b border-border px-4 py-3 lg:hidden">
+                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground" htmlFor="task-project">Проект</label>
+                <select
+                  id="task-project"
+                  value={projectId ?? ""}
+                  onChange={(e) => selectProject(e.target.value)}
+                  className="h-9 w-full truncate rounded-md border border-border bg-card px-2.5 text-sm"
+                >
+                  {data.projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <nav className="hidden flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 lg:block">
+                {data.projects.map((p) => {
+                  const active = p.id === projectId;
+                  const own = data.tasks.filter((t) => t.project_id === p.id);
+                  const open = own.filter((t) => t.status !== "done").length;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => selectProject(p.id)}
+                      aria-current={active ? "true" : undefined}
+                      title={`${p.code} · ${p.name}`}
+                      className={`relative flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${active ? "bg-secondary/70" : "hover:bg-secondary/35"}`}
+                    >
+                      {active && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />}
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[11px] font-semibold uppercase tracking-wide ${active ? "border-primary/30 bg-primary/[0.08] text-primary" : "border-border bg-card text-muted-foreground"}`}>
+                        {p.code.slice(0, 3)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className={`line-clamp-2 text-[14px] leading-tight ${active ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>{p.name}</span>
+                        <span className="mt-1 block truncate text-[11px] text-muted-foreground">{own.length > 0 ? `${own.length} ${plural(own.length, "задача", "задачи", "задач")}` : "Нет задач"}</span>
+                      </span>
+                      {open > 0 && (
+                        <span title={`Открытых задач: ${open}`} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${active ? "bg-primary/[0.12] text-primary" : "bg-secondary/70 text-muted-foreground"}`}>{open}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="mt-auto hidden lg:block">
+                <Members data={data} projectId={project.id} />
+              </div>
+              </div>
+            </aside>
+
+            {/* 2. Tasks of the selected project */}
+            <section aria-label="Задачи проекта" className={`min-w-0 flex-col border-border lg:flex xl:border-r ${selected ? "hidden" : "flex"}`}>
+              <div className="flex flex-1 flex-col xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:flex-none xl:overflow-y-auto">
+              <div className="border-b border-border px-4 pb-3 pt-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{project.code}</div>
+                    <h2 className="truncate text-base font-semibold tracking-tight" title={project.name}>{project.name}</h2>
+                  </div>
+                  <Button size="sm" className="h-8 shrink-0 active:scale-[0.97]" aria-expanded={composerOpen} onClick={() => setComposerOpen((open) => !open)}>
+                    <Plus className="h-4 w-4" />
+                    Задача
+                  </Button>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <div className="relative flex h-8 items-center rounded-md border border-border bg-background/40 p-0.5">
+                    {([
+                      [false, "Все задачи"],
+                      [true, "Мои задачи"],
+                    ] as const).map(([mine, label]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={mineOnly === mine}
+                        onClick={() => {
+                          setMineOnly(mine);
+                          setTaskId(null);
+                        }}
+                        className={`relative h-full rounded px-2.5 text-xs transition-colors ${mineOnly === mine ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {mineOnly === mine && <motion.span layoutId="task-filter-pill" transition={SOFT_SPRING} className="absolute inset-0 rounded bg-secondary" />}
+                        <span className="relative">{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <StatusSummary tasks={tasks} />
+                </div>
               </div>
               <AnimatePresence initial={false}>
                 {composerOpen && (
-                  <motion.div key="composer" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden px-3">
-                    <div className="pb-3">
+                  <motion.div key="composer" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden border-b border-border">
+                    <div className="p-3">
                       <NewTask projectId={project.id} members={membersOf(data, project.id)} parentId={null} />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
               <AnimatePresence mode="wait" initial={false}>
-                <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="flex-1 px-2 pb-2">
-                  <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} />
+                <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="flex-1 p-2">
+                  <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} onCreate={composerOpen ? undefined : () => setComposerOpen(true)} onShowAll={() => setMineOnly(false)} />
                 </motion.div>
               </AnimatePresence>
-              <Members data={data} projectId={project.id} />
-            </div>
-            <div className="min-w-0">
+              <div className="lg:hidden">
+                <Members data={data} projectId={project.id} />
+              </div>
+              </div>
+            </section>
+
+            {/* 3. Selected task */}
+            <section aria-label="Детали задачи" className={`min-w-0 border-t border-border lg:col-start-2 lg:block xl:col-start-auto xl:border-t-0 xl:bg-background/30 xl:shadow-[inset_1px_0_0_oklch(1_0_0/0.05)] ${selected ? "block border-t-0" : "hidden"}`}>
               <AnimatePresence mode="wait" initial={false}>
                 {selected ? (
                   <motion.div key={selected.id} {...fadeUp} transition={EASE_OUT}>
+                    <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 lg:hidden">
+                      <Button variant="ghost" size="sm" className="h-8 -ml-2 text-muted-foreground" onClick={() => setTaskId(null)}>
+                        <ChevronLeft className="h-4 w-4" />
+                        Задачи
+                      </Button>
+                      <span className="truncate text-xs text-muted-foreground">{project.code} · {project.name}</span>
+                    </div>
                     <TaskDetail task={selected} data={data} onSelect={setTaskId} />
                   </motion.div>
                 ) : (
-                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={EASE_OUT} className="flex min-h-[26rem] flex-col items-center justify-center px-8 py-10 text-center">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-secondary/60 text-muted-foreground">
-                      <ListChecks className="h-5 w-5" />
-                    </div>
-                    <h2 className="mt-4 text-sm font-medium">Выберите задачу из списка</h2>
-                    <p className="mt-1.5 max-w-xs text-sm text-muted-foreground">Здесь появятся детали задачи, таймер, история изменений и комментарии.</p>
-                    <div className="mt-5 flex items-center gap-4 text-xs text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5"><Timer className="h-3.5 w-3.5" />Таймер</span>
-                      <span className="inline-flex items-center gap-1.5"><History className="h-3.5 w-3.5" />История</span>
-                      <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5" />Комментарии</span>
+                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={EASE_OUT} className="px-6 py-8">
+                    <div className="flex items-start gap-3 rounded-lg border border-dashed border-border px-4 py-4">
+                      <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div>
+                        <div className="text-sm font-medium">Задача не выбрана</div>
+                        <p className="mt-0.5 text-sm text-muted-foreground">Выберите задачу в списке, чтобы увидеть таймер, подзадачи, комментарии и историю.</p>
+                      </div>
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
+            </section>
           </div>
         )}
       </div>
     </MotionConfig>
   );
+}
+
+/** Russian plural form for 1 / 2–4 / 5+ */
+function plural(n: number, one: string, few: string, many: string) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+/** Status glyph: one restrained shape per status instead of coloured pills. */
+function StatusIcon({ status, className = "" }: { status: string; className?: string }) {
+  if (status === "done") return <CheckCircle2 aria-hidden className={`h-4 w-4 text-muted-foreground ${className}`} />;
+  if (status === "waiting") return <Hourglass aria-hidden className={`h-3.5 w-3.5 text-amber-300/80 ${className}`} />;
+  if (status === "in_progress")
+    return (
+      <span aria-hidden className={`flex h-4 w-4 items-center justify-center rounded-full border border-primary/60 ${className}`}>
+        <span className="h-2 w-2 rounded-full bg-primary" />
+      </span>
+    );
+  return <span aria-hidden className={`h-4 w-4 rounded-full border border-muted-foreground/50 ${className}`} />;
+}
+
+/** Counts per status for the selected project, shown as quiet inline text. */
+function StatusSummary({ tasks }: { tasks: Task[] }) {
+  if (tasks.length === 0) return null;
+  const count = (status: string) => tasks.filter((t) => t.status === status).length;
+  const parts = (["in_progress", "todo", "waiting", "done"] as const).map((s) => [s, count(s)] as const).filter(([, n]) => n > 0);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+      {parts.map(([s, n]) => (
+        <span key={s} className="inline-flex items-center gap-1.5">
+          <StatusIcon status={s} className="scale-[0.8]" />
+          {STATUS_LABEL[s]} <span className="tabular-nums text-foreground/80">{n}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** "Савинов Денис Витальевич" → "Савинов Д. В." for dense rows; full name stays in the title tooltip. */
+function shortName(fullName: string) {
+  const [last, ...rest] = fullName.trim().split(/\s+/);
+  if (!last || rest.length === 0) return fullName;
+  return `${last} ${rest.map((part) => `${part[0]}.`).join(" ")}`;
+}
+
+function dueLabel(task: Task) {
+  if (!task.due_at) return null;
+  const due = new Date(task.due_at);
+  if (Number.isNaN(due.getTime())) return null;
+  const overdue = task.status !== "done" && due.getTime() < Date.now();
+  return { text: due.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }), overdue };
 }
 
 type WS = Awaited<ReturnType<typeof getWorkspace>>;
@@ -296,7 +410,7 @@ function LiveBadge() {
   );
 }
 
-function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS }) {
+function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data, onCreate, onShowAll }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS; onCreate?: (() => void) | undefined; onShowAll: () => void }) {
   const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
   if (mineOnly) {
     const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -310,9 +424,14 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
     }
   }
   const roots = tasks.filter((t) => visibleIds.has(t.id) && (!t.parent_task_id || !tasks.some((x) => x.id === t.parent_task_id)));
+  const childrenOf = (id: string) => tasks.filter((c) => visibleIds.has(c.id) && c.parent_task_id === id);
   const render = (t: Task, depth: number): React.ReactNode => {
     const selected = t.id === selectedId;
     const live = running.some((r) => r.task_id === t.id);
+    const children = childrenOf(t.id);
+    const assignee = t.assignee_id ? data.profiles.find((p) => p.id === t.assignee_id) : null;
+    const due = dueLabel(t);
+    const urgent = t.priority === "high" || t.priority === "critical";
     return (
       <div key={t.id}>
         <motion.button
@@ -321,40 +440,66 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
           whileTap={{ scale: 0.995 }}
           aria-current={selected ? "true" : undefined}
           title={t.title}
-          className={`relative flex w-full items-center gap-3 rounded-md py-2 pr-3 text-left text-sm transition-colors duration-200 ${selected ? "" : "hover:bg-secondary/40"}`}
-          style={{ paddingLeft: 12 + depth * 18 }}
+          className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-200 ${selected ? "" : "hover:bg-secondary/35"}`}
         >
           {selected && (
-            <motion.span layoutId="task-selection" transition={SOFT_SPRING} className="absolute inset-0 rounded-md bg-secondary/80">
-              <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" />
+            <motion.span layoutId="task-selection" transition={SOFT_SPRING} className="absolute inset-0 rounded-lg bg-secondary/70 shadow-[inset_0_0_0_1px_oklch(1_0_0/0.06)]">
+              <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />
             </motion.span>
           )}
-          <span className="relative flex min-w-0 flex-1 items-center gap-3">
-            {depth > 0 && <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-            <span className="w-11 shrink-0 font-mono text-xs text-muted-foreground">#{t.number}</span>
-            <span className="min-w-0 flex-1">
-              <span className={`block truncate ${selected ? "font-medium text-foreground" : depth > 0 ? "text-foreground/80" : "font-medium text-foreground/90"}`}>{t.title}</span>
-              <span className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="truncate">{t.assignee_id ? nameOf(data, t.assignee_id) : "Без исполнителя"}</span>
-                {t.priority === "high" || t.priority === "critical" ? <span className="shrink-0 text-amber-300/80">· {PRIORITY_LABEL[t.priority]}</span> : null}
-                {live && <LiveBadge />}
-              </span>
+          <span className="relative mt-0.5 flex h-5 w-4 shrink-0 items-center justify-center"><StatusIcon status={t.status} /></span>
+          <span className="relative min-w-0 flex-1">
+            <span className="flex items-baseline gap-2">
+              <span className="shrink-0 font-mono text-[11px] text-muted-foreground/65">#{t.number}</span>
+              <span className={`truncate leading-5 ${depth > 0 ? "text-[13px]" : "text-[14px]"} ${t.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : selected ? "font-medium text-foreground" : depth > 0 ? "text-foreground/85" : "font-medium text-foreground/95"}`}>{t.title}</span>
             </span>
-            <span className="shrink-0 text-right">
-              <span className={`block font-mono text-xs tabular-nums ${live ? "text-foreground" : "text-muted-foreground"}`}><LiveSpent task={t} running={running}>{(spent) => formatDuration(spent)}</LiveSpent></span>
-              <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-[10px] ${statusTone(t.status)}`}>{STATUS_LABEL[t.status]}</span>
+            <span className="mt-0.5 flex min-w-0 items-center gap-x-2.5 text-[11px] leading-4 text-muted-foreground/75">
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                {assignee ? (
+                  <ProfileAvatar avatarUrl={assignee.avatar_url} name={assignee.full_name || "Сотрудник"} initials={initialsOf(assignee.full_name || "С")} className="h-4 w-4 rounded-full" fallbackClassName="text-[8px]" />
+                ) : (
+                  <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border" />
+                )}
+                <span className="truncate" title={assignee?.full_name ?? undefined}>{assignee ? shortName(assignee.full_name || "Сотрудник") : "Без исполнителя"}</span>
+              </span>
+              {live && <LiveBadge />}
+              {urgent && <span className={`shrink-0 ${t.priority === "critical" ? "text-destructive/85" : "text-amber-300/70"}`}>{PRIORITY_LABEL[t.priority]}</span>}
+              {due && <span className={`shrink-0 ${due.overdue ? "text-destructive/85" : "hidden sm:inline"}`}>до {due.text}</span>}
+              {children.length > 0 && (
+                <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" title="Подзадачи: готово / всего"><CornerDownRight className="h-3 w-3" />{children.filter((c) => c.status === "done").length}/{children.length}</span>
+              )}
             </span>
           </span>
+          <span className="relative hidden shrink-0 pt-0.5 text-right sm:block">
+            <span className={`block font-mono text-[11px] tabular-nums ${live ? "text-foreground/90" : "text-muted-foreground/65"}`}><LiveSpent task={t} running={running}>{(spent) => formatDuration(spent)}</LiveSpent></span>
+          </span>
+          <span className="sr-only">{STATUS_LABEL[t.status]}</span>
         </motion.button>
-        {tasks.filter((c) => visibleIds.has(c.id) && c.parent_task_id === t.id).map((c) => render(c, depth + 1))}
+        {children.length > 0 && (
+          <div className="relative ml-[1.25rem] border-l border-border pl-2">
+            {children.map((c) => render(c, depth + 1))}
+          </div>
+        )}
       </div>
     );
   };
-  return (
-    <div>
-      {tasks.length === 0 ? <div className="px-3 py-6 text-sm text-muted-foreground">В проекте пока нет задач.</div> : roots.length === 0 ? <div className="px-3 py-6 text-sm text-muted-foreground">Нет задач, назначенных на вас.</div> : <div className="divide-y divide-border/40">{roots.map((t) => render(t, 0))}</div>}
-    </div>
-  );
+  if (tasks.length === 0 || roots.length === 0) {
+    const empty = tasks.length === 0;
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3.5">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">{empty ? "В проекте пока нет задач" : "Нет задач, назначенных на вас"}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{empty ? "Начните с первой задачи — подзадачи можно добавить позже." : "Остальные задачи проекта — во вкладке «Все задачи»."}</p>
+        </div>
+        {empty ? (
+          onCreate && <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={onCreate}><Plus className="h-4 w-4" />Создать</Button>
+        ) : (
+          <Button size="sm" variant="ghost" className="h-8 shrink-0 text-muted-foreground" onClick={onShowAll}>Все задачи</Button>
+        )}
+      </div>
+    );
+  }
+  return <div className="space-y-0.5">{roots.map((t) => render(t, 0))}</div>;
 }
 
 function NewProject({ onCreated }: { onCreated: (id: string) => void }) {
@@ -462,34 +607,45 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
   const members = membersOf(data, projectId);
   const others = data.profiles.filter((p) => !members.some((m) => m.id === p.id));
   const [uid, setUid] = useState("");
+  // UI-only: the add-member picker stays folded so it does not compete with projects.
+  const [adding, setAdding] = useState(false);
   const m = useMutation({
     mutationFn: () => add({ data: { projectId, userId: uid, role: "member" } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: WS_KEY });
       setUid("");
+      setAdding(false);
     },
     onError: (e: Error) => toast.error(e.message),
   });
   return (
-    <div className="mt-auto border-t border-border/60 px-4 py-3 opacity-80 transition-opacity hover:opacity-100">
-      <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        <Users className="h-3.5 w-3.5" />
-        Участники · {members.length}
+    <div className="border-t border-border/60 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <Users className="h-3.5 w-3.5" />
+          Участники · {members.length}
+        </span>
+        {others.length > 0 && !adding && (
+          <button type="button" onClick={() => setAdding(true)} className="text-[11px] text-muted-foreground transition-colors hover:text-foreground">
+            + Добавить
+          </button>
+        )}
       </div>
       <div className="flex flex-wrap gap-1">
         {members.map((p) => (
           <span key={p.id} title={p.full_name || "Сотрудник"} className="max-w-[12rem] truncate rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground">{p.full_name || "Сотрудник"}</span>
         ))}
       </div>
-      {others.length > 0 && (
-        <div className="mt-2 flex gap-1.5">
-          <select value={uid} onChange={(e) => setUid(e.target.value)} className="h-7 flex-1 rounded-md border border-input bg-background px-2 text-xs">
+      {others.length > 0 && adding && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <select aria-label="Добавить участника" value={uid} onChange={(e) => setUid(e.target.value)} className="h-7 min-w-0 flex-1 basis-40 rounded-md border border-input bg-background px-2 text-xs">
             <option value="">Добавить сотрудника…</option>
             {others.map((p) => (
               <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
             ))}
           </select>
-          <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={!uid || m.isPending} onClick={() => m.mutate()}>Добавить</Button>
+          <Button size="sm" variant="secondary" className="h-7 text-xs" disabled={!uid || m.isPending} onClick={() => m.mutate()}>Добавить</Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => { setAdding(false); setUid(""); }}>Отмена</Button>
         </div>
       )}
     </div>
@@ -506,6 +662,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
   const myRunning = data.running.some((r) => r.task_id === task.id && r.user_id === data.userId);
   const subtasks = data.tasks.filter((t) => t.parent_task_id === task.id);
   const parent = data.tasks.find((t) => t.id === task.parent_task_id);
+  const assigneeProfile = task.assignee_id ? data.profiles.find((p) => p.id === task.assignee_id) ?? null : null;
   const [report, setReport] = useState("");
   const [showReport, setShowReport] = useState(false);
   // UI-only: the subtask composer stays collapsed until requested.
@@ -550,7 +707,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
   return (
     <div className="divide-y divide-border">
       {/* Header */}
-      <section className="px-6 pb-5 pt-6">
+      <section className="px-6 pb-6 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
@@ -559,19 +716,12 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
                 <>
                   <span aria-hidden>·</span>
                   <span>подзадача</span>
-                  <button type="button" className="text-primary hover:underline" onClick={() => onSelect(parent.id)}>#{parent.number} {parent.title}</button>
+                  <button type="button" className="truncate text-foreground/80 underline-offset-2 hover:text-primary hover:underline" onClick={() => onSelect(parent.id)}>#{parent.number} {parent.title}</button>
                 </>
               )}
             </div>
-            <h2 className="mt-1.5 break-words text-xl font-semibold tracking-tight">{task.title}</h2>
-            {task.description && <p className="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>}
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-              <span className={`rounded-full px-2.5 py-1 ${statusTone(task.status)}`}>{STATUS_LABEL[task.status]}</span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-muted-foreground">
-                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-secondary text-[9px] font-semibold text-foreground">{task.assignee_id ? initialsOf(nameOf(data, task.assignee_id)) : "—"}</span>
-                {task.assignee_id ? nameOf(data, task.assignee_id) : "Без исполнителя"}
-              </span>
-            </div>
+            <h2 className="mt-1.5 break-words text-[22px] font-semibold leading-tight tracking-tight">{task.title}</h2>
+            {task.description && <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground sm:text-sm">{task.description}</p>}
           </div>
           <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={() => {
             setTitleDraft(task.title);
@@ -583,6 +733,27 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             setEditing((value) => !value);
           }}>{editing ? "Закрыть" : "Изменить"}</Button>
         </div>
+
+        {/* Properties: one quiet label/value grid instead of chips and cards. */}
+        <dl className="mt-5 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 sm:gap-y-1.5 text-sm sm:grid-cols-[6rem_minmax(0,1fr)_6rem_minmax(0,1fr)]">
+          <dt className="text-xs leading-6 text-muted-foreground">Статус</dt>
+          <dd className="flex min-w-0 items-center gap-2 leading-6"><StatusIcon status={task.status} className="scale-90" />{STATUS_LABEL[task.status]}</dd>
+          <dt className="text-xs leading-6 text-muted-foreground">Приоритет</dt>
+          <dd className={`leading-6 ${task.priority === "critical" ? "text-destructive" : task.priority === "high" ? "text-amber-300/90" : "text-foreground/85"}`}>{PRIORITY_LABEL[task.priority] ?? task.priority}</dd>
+          <dt className="text-xs leading-6 text-muted-foreground">Срок</dt>
+          <dd className={`leading-6 ${dueLabel(task)?.overdue ? "text-destructive" : task.due_at ? "" : "text-muted-foreground"}`}>{task.due_at ? new Date(task.due_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Не задан"}</dd>
+          <dt className="text-xs leading-6 text-muted-foreground">Оценка</dt>
+          <dd className={`leading-6 ${est ? "font-mono tabular-nums" : "text-muted-foreground"}`}>{est ? formatDuration(est) : "Не задана"}</dd>
+          <dt className="text-xs leading-6 text-muted-foreground">Исполнитель</dt>
+          <dd className="flex min-w-0 items-center gap-2 leading-6 sm:col-span-3">
+            {assigneeProfile ? (
+              <ProfileAvatar avatarUrl={assigneeProfile.avatar_url} name={assigneeProfile.full_name || "Сотрудник"} initials={initialsOf(assigneeProfile.full_name || "С")} className="h-5 w-5 rounded-full" fallbackClassName="text-[9px]" />
+            ) : (
+              <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" />
+            )}
+            <span className="min-w-0 break-words">{task.assignee_id ? nameOf(data, task.assignee_id) : <span className="text-muted-foreground">Не назначен</span>}</span>
+          </dd>
+        </dl>
 
         <AnimatePresence initial={false}>
           {editing && (
@@ -644,7 +815,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             </LiveSpent>
           </div>
           {(actions.length > 0 || task.status === "in_progress" || task.status === "waiting") && (
-            <motion.div layout transition={EASE_OUT} className="flex flex-wrap items-center gap-1">
+            <motion.div layout transition={EASE_OUT} className="flex w-full flex-wrap items-center gap-1 border-t border-border/60 pt-3 sm:w-auto sm:border-t-0 sm:pt-0">
               {actions.map((x) => (
                 <motion.span key={x.a} layout whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
                   <Button
@@ -687,14 +858,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
 
       {/* Metadata + progress */}
       <section className="px-6 py-5">
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
-          <Stat label="Оценка" value={est ? formatDuration(est) : "—"} />
-          <Stat label="Исполнитель" value={nameOf(data, task.assignee_id)} />
-          <Stat label="Приоритет" value={PRIORITY_LABEL[task.priority] ?? task.priority} />
-          <Stat label="Срок" value={task.due_at ? new Date(task.due_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" }) : "Не задан"} />
-        </dl>
-
-        <div className="mt-5">
+        <div>
           <div className="mb-1.5 flex justify-between text-xs">
             <span className="text-muted-foreground">Прогресс{subtasks.length ? " · по подзадачам" : ""}</span>
             <span className="font-medium tabular-nums">{task.progress}%</span>
@@ -735,7 +899,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
       {/* Subtasks */}
       <section className="px-6 py-5">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Подзадачи · {subtasks.length}</h3>
+          <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Подзадачи · {subtasks.length}</h3>
           {task.status !== "done" && (
             <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" aria-expanded={subtaskFormOpen} onClick={() => setSubtaskFormOpen((open) => !open)}>
               <Plus className="h-3.5 w-3.5" />
@@ -758,10 +922,10 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
                   title={st.title}
                   className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-secondary/40"
                 >
-                  <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <StatusIcon status={st.status} />
                   <span className="font-mono text-xs text-muted-foreground">#{st.number}</span>
-                  <span className="flex-1 truncate">{st.title}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${statusTone(st.status)}`}>{STATUS_LABEL[st.status]}</span>
+                  <span className={`flex-1 truncate ${st.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : ""}`}>{st.title}</span>
+                  <span className="text-[11px] text-muted-foreground">{STATUS_LABEL[st.status]}</span>
                 </motion.button>
               ))}
             </AnimatePresence>
@@ -781,8 +945,8 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
       <Comments taskId={task.id} data={data} comments={activity.data?.comments ?? []} />
 
       {/* History timeline */}
-      <section className="px-6 py-5">
-        <h3 className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground"><History className="h-3.5 w-3.5" /> История</h3>
+      <section className="bg-background/25 px-6 py-6">
+        <h3 className="mb-4 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><History className="h-3.5 w-3.5" /> История · {history.length}</h3>
         {entries.length > 0 && (
           <div className="mb-4 rounded-lg border border-border">
             <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">Интервалы времени</div>
@@ -876,15 +1040,6 @@ function describe(h: { action: string; field: string | null; old_value: unknown;
   }
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-words text-sm font-medium leading-snug text-foreground" title={value}>{value}</dd>
-    </div>
-  );
-}
-
 type Comment = Awaited<ReturnType<typeof getTaskActivity>>["comments"][number];
 
 function Comments({ taskId, data, comments }: { taskId: string; data: WS; comments: Comment[] }) {
@@ -936,9 +1091,9 @@ function Comments({ taskId, data, comments }: { taskId: string; data: WS; commen
     );
   };
   return (
-    <section className="px-6 py-5">
-      <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground"><MessageSquare className="h-3.5 w-3.5" /> Комментарии · {comments.length}</h3>
-      <div className="mt-1">
+    <section className="px-6 py-6">
+      <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><MessageSquare className="h-3.5 w-3.5" /> Комментарии · {comments.length}</h3>
+      <div className="mt-2">
         <AnimatePresence initial={false}>{roots.map((c) => renderC(c, 0))}</AnimatePresence>
       </div>
       <div className="mt-3 flex gap-2">
