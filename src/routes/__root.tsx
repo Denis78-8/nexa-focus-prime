@@ -75,6 +75,8 @@ function RootErrorComponent({ error, reset }: { error: Error; reset: () => void 
   );
 }
 
+const ErrorComponent = lazy(async () => ({ default: RootErrorComponent }));
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   head: () => ({
     meta: [
