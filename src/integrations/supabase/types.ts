@@ -79,6 +79,24 @@ export type Database = {
         }
         Relationships: []
       }
+      corporate_mail_settings: {
+        Row: {
+          domain: string
+          singleton: boolean
+          updated_at: string
+        }
+        Insert: {
+          domain: string
+          singleton?: boolean
+          updated_at?: string
+        }
+        Update: {
+          domain?: string
+          singleton?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       corporate_mailboxes: {
         Row: {
           created_at: string
@@ -682,6 +700,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      corporate_mail_domain: { Args: never; Returns: string }
       create_access_level_request: {
         Args: { _reason: string; _requested_level: number }
         Returns: {
@@ -704,6 +723,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      current_user_is_owner: { Args: never; Returns: boolean }
       ensure_my_profile: {
         Args: { _full_name?: string }
         Returns: {
@@ -731,8 +751,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      finish_corporate_mailbox_provisioning: {
+        Args: { _mailbox_id: string; _result: string }
+        Returns: Json
+      }
       get_admin_panel_data: { Args: never; Returns: Json }
       get_employee_credential_states: { Args: never; Returns: Json }
+      get_mailbox_reservation_target: {
+        Args: { _user_id: string }
+        Returns: Json
+      }
       get_my_access_level_requests: {
         Args: never
         Returns: {
@@ -757,6 +785,27 @@ export type Database = {
       }
       get_my_credential_state: { Args: never; Returns: Json }
       get_my_nexa_access_flags: { Args: never; Returns: Json }
+      get_my_notifications: {
+        Args: never
+        Returns: {
+          access_request_id: string | null
+          body: string | null
+          created_at: string
+          id: string
+          metadata: Json
+          read_at: string | null
+          title: string
+          type: string
+          user_id: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "notifications"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      get_system_status: { Args: never; Returns: Json }
       has_permission: { Args: { _permission: string }; Returns: boolean }
       has_permission_for: {
         Args: { _permission: string; _user_id: string }
@@ -770,7 +819,13 @@ export type Database = {
         Returns: boolean
       }
       is_active_user: { Args: { _user_id: string }; Returns: boolean }
+      mark_all_notifications_read: { Args: never; Returns: number }
+      mark_notifications_read: { Args: { _ids: string[] }; Returns: number }
       recalc_parent_progress: { Args: { _parent: string }; Returns: undefined }
+      reserve_corporate_mailbox: {
+        Args: { _email: string; _local_part: string; _user_id: string }
+        Returns: Json
+      }
       review_access_level_request: {
         Args: { _decision: string; _request_id: string }
         Returns: {
@@ -794,6 +849,10 @@ export type Database = {
         }
       }
       revoke_user_sessions: { Args: { _user_id: string }; Returns: number }
+      suggest_corporate_email: {
+        Args: { _for_user?: string; _local_part: string }
+        Returns: Json
+      }
       task_transition: {
         Args: {
           _action: string
@@ -841,6 +900,15 @@ export type Database = {
           _position: string
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
+        }
+        Returns: Json
+      }
+      update_permission_matrix: {
+        Args: {
+          _enabled: boolean
+          _kind: string
+          _permission: string
+          _subject: string
         }
         Returns: Json
       }
