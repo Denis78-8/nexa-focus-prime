@@ -53,6 +53,19 @@ export function initialsOf(fullName: string) {
   return fullName.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("ru-RU") || "NX";
 }
 
+/**
+ * The one way to render an employee's name. VIP names get the warm LUNO
+ * accent and a slightly heavier weight; everyone else keeps the caller's style.
+ * Layout classes (truncate, size) come from the caller.
+ */
+export function EmployeeName({ name, isVip, className = "", title }: { name: string; isVip?: boolean | null | undefined; className?: string; title?: string | undefined }) {
+  return (
+    <span title={title} className={`${className} ${isVip ? "font-semibold text-[oklch(0.83_0.13_68)]" : ""}`}>
+      {name}
+    </span>
+  );
+}
+
 /** The one VIP mark used everywhere; render it only when profiles.is_vip is true. */
 export function VipBadge({ size = "md" }: { size?: "sm" | "md" }) {
   return (

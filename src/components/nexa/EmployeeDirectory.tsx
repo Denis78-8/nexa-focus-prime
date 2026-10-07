@@ -5,7 +5,7 @@ import { Search, Users } from "lucide-react";
 import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 import { Input } from "@/components/ui/input";
 import { getEmployeeDirectory, type DirectoryEmployee } from "@/lib/directory.functions";
-import { PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, initialsOf, realPhone, realValue } from "@/components/nexa/profile-display";
+import { EmployeeName, PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, initialsOf, realPhone, realValue } from "@/components/nexa/profile-display";
 
 type Filter = "all" | "online" | "offline" | "vip";
 
@@ -62,7 +62,7 @@ function EmployeeListItem({ employee, selected, isSelf, onSelect }: { employee: 
       <EmployeeAvatar employee={employee} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium" title={employee.full_name || "Сотрудник"}>{employee.full_name || "Сотрудник"}</span>
+          <EmployeeName name={employee.full_name || "Сотрудник"} isVip={employee.is_vip} title={employee.full_name || "Сотрудник"} className="min-w-0 truncate text-sm font-medium" />
           {employee.is_vip && <VipBadge size="sm" />}
           {isSelf && <span className="shrink-0 text-[10px] text-muted-foreground">вы</span>}
         </div>
@@ -97,7 +97,7 @@ function EmployeeDetails({ employee, canSeePrivate }: { employee: DirectoryEmplo
           <EmployeeAvatar employee={employee} size="lg" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              <h2 className="text-2xl font-semibold tracking-tight">{employee.full_name || "Сотрудник"}</h2>
+              <h2 className="text-2xl font-semibold tracking-tight"><EmployeeName name={employee.full_name || "Сотрудник"} isVip={employee.is_vip} /></h2>
               {employee.is_vip && <VipBadge />}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -217,7 +217,7 @@ export function EmployeeDirectory() {
       {directory.error && <p role="alert" className="rounded-lg border border-border bg-card p-5 text-sm text-destructive">{(directory.error as Error).message}</p>}
 
       {data && (
-        <div className="grid gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[22rem_minmax(0,1fr)]">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[20rem_minmax(0,1fr)] xl:grid-cols-[22rem_minmax(0,1fr)]">
           <aside className="h-fit rounded-lg border border-border bg-card p-1.5 lg:sticky lg:top-24">
             {visible.length === 0 ? (
               <div className="flex flex-col items-center px-4 py-10 text-center">

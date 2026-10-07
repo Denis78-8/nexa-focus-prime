@@ -24,6 +24,7 @@ import {
 } from "@/lib/tasks.functions";
 import { formatDuration, getNexaSessionId } from "@/lib/nexa-session";
 import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
+import { EmployeeName } from "@/components/nexa/profile-display";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
@@ -512,6 +513,13 @@ function membersOf(data: WS, projectId: string) {
   return data.profiles.filter((p) => ids.has(p.id));
 }
 
+/** Name of a workspace profile, rendered through EmployeeName (VIP accent). */
+function PersonName({ data, id, className = "", short = false }: { data: WS; id: string | null; className?: string; short?: boolean }) {
+  const profile = id ? data.profiles.find((x) => x.id === id) : undefined;
+  const full = nameOf(data, id);
+  return <EmployeeName name={short ? shortName(full) : full} isVip={profile?.is_vip} title={full} className={className} />;
+}
+
 function nameOf(data: WS, id: string | null) {
   if (!id) return "—";
   const p = data.profiles.find((x) => x.id === id);
@@ -602,7 +610,7 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
                 ) : (
                   <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border" />
                 )}
-                <span className="truncate" title={assignee?.full_name ?? undefined}>{assignee ? shortName(assignee.full_name || "Сотрудник") : "Без исполнителя"}</span>
+                {assignee ? <EmployeeName name={shortName(assignee.full_name || "Сотрудник")} isVip={assignee.is_vip} title={assignee.full_name ?? undefined} className="truncate" /> : <span className="truncate">Без исполнителя</span>}
               </span>
               {live && <LiveBadge />}
               {urgent && <span className={`shrink-0 ${t.priority === "critical" ? "text-destructive/85" : "text-amber-300/70"}`}>{PRIORITY_LABEL[t.priority]}</span>}
@@ -786,7 +794,7 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
       </div>
       <div className="flex flex-wrap gap-1">
         {members.map((p) => (
-          <span key={p.id} title={p.full_name || "Сотрудник"} className="max-w-[12rem] truncate rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground">{p.full_name || "Сотрудник"}</span>
+          <EmployeeName key={p.id} name={p.full_name || "Сотрудник"} isVip={p.is_vip} title={p.full_name || "Сотрудник"} className="max-w-[12rem] truncate rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground" />
         ))}
       </div>
       {others.length > 0 && adding && (
@@ -906,7 +914,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             ) : (
               <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" />
             )}
-            <span className="min-w-0 break-words">{task.assignee_id ? nameOf(data, task.assignee_id) : <span className="text-muted-foreground">Не назначен</span>}</span>
+            {task.assignee_id ? <PersonName data={data} id={task.assignee_id} className="min-w-0 break-words" /> : <span className="min-w-0 text-muted-foreground">Не назначен</span>}
           </dd>
         </dl>
 
@@ -1114,7 +1122,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">Интервалы времени</div>
             {entries.map((e) => (
               <div key={e.id} className="flex justify-between px-3 py-1.5 text-xs text-muted-foreground">
-                <span>{nameOf(data, e.user_id)} · {new Date(e.started_at).toLocaleString("ru-RU")}</span>
+                <span><PersonName data={data} id={e.user_id} /> · {new Date(e.started_at).toLocaleString("ru-RU")}</span>
                 <span className="font-mono tabular-nums">{e.ended_at ? formatDuration(e.duration_seconds ?? 0) : "идёт…"}</span>
               </div>
             ))}
@@ -1135,7 +1143,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
               </span>
               <span className="min-w-0 text-xs leading-relaxed">
                 <span className="text-foreground/90">{describe(h, data)}</span>
-                <span className="block text-muted-foreground">{nameOf(data, h.actor_id)} · {new Date(h.created_at).toLocaleString("ru-RU")}</span>
+                <span className="block text-muted-foreground"><PersonName data={data} id={h.actor_id} /> · {new Date(h.created_at).toLocaleString("ru-RU")}</span>
               </span>
             </motion.li>
           ))}
@@ -1231,7 +1239,7 @@ function Comments({ taskId, data, comments }: { taskId: string; data: WS; commen
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-secondary text-[10px] font-semibold">{initialsOf(author)}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2">
-              <span className={`text-sm font-medium ${vip ? "text-primary" : "text-foreground"}`}>{author}</span>
+              <EmployeeName name={author} isVip={vip} className="text-sm font-medium text-foreground" />
               <span className="text-[11px] text-muted-foreground/70">{new Date(c.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}</span>
             </div>
             <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{c.body}</p>

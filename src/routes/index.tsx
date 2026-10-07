@@ -29,7 +29,7 @@ function TabLoading() {
 import { EditableProfileAvatar, ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 import { NOTIFICATIONS_QUERY_KEY, NotificationsCenter, useMyNotifications } from "@/components/nexa/NotificationsCenter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, realPhone, realValue } from "@/components/nexa/profile-display";
+import { EmployeeName, PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, realPhone, realValue } from "@/components/nexa/profile-display";
 import { getAdminAccess } from "@/lib/admin.functions";
 import { getAuthGateDiagnostics, getCurrentProfile } from "@/lib/profile.functions";
 import { getMyCredentialState, TEMPORARY_PASSWORD_EXPIRED_MESSAGE } from "@/lib/credentials.functions";
@@ -515,7 +515,6 @@ function NexaPrototype() {
               className="relative ml-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-secondary text-xs font-semibold transition-all duration-200 hover:border-foreground/30 active:scale-95"
             >
               <ProfileAvatar avatarUrl={currentProfile?.avatar_url} name={currentProfile?.full_name ?? ""} initials={currentProfile?.initials ?? "NX"} className="h-full w-full rounded-[inherit]" fallbackClassName="text-xs" />
-              {currentProfile?.is_vip && <span title="VIP" aria-label="VIP" className="absolute -right-1 -top-1 grid h-4 w-4 place-items-center rounded-full border border-amber-300/40 bg-background text-[9px] text-amber-200">✦</span>}
             </button>
           </div>
         </div>
@@ -858,6 +857,7 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
   // Latest activity first: updated_at changes on status, timer and field edits.
   const recentTasks = [...tasks].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 5);
   const nameOf = (id: string | null) => (id ? data?.profiles.find((profile) => profile.id === id)?.full_name || "Сотрудник" : null);
+  const isVipOf = (id: string | null) => Boolean(id && data?.profiles.find((profile) => profile.id === id)?.is_vip);
 
   // Team load: open tasks per assignee, as a share of all open assigned tasks.
   const openAssigned = openTasks.filter((task) => task.assignee_id);
@@ -914,7 +914,7 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
                   <span className="min-w-0 flex-1">
                     <span className="block truncate" title={t.title}>{t.title}</span>
                     <span className="block truncate text-[11px] text-muted-foreground">
-                      {nameOf(t.assignee_id) ?? "Без исполнителя"}
+                      {t.assignee_id ? <EmployeeName name={nameOf(t.assignee_id) ?? "Сотрудник"} isVip={isVipOf(t.assignee_id)} /> : "Без исполнителя"}
                       {runningTaskIds.has(t.id) && <span className="text-primary"> · таймер идёт</span>}
                     </span>
                   </span>
@@ -935,7 +935,7 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
             teamLoad.map((a) => (
               <div key={a.id} className="mb-3">
                 <div className="mb-1 flex justify-between gap-3 text-xs">
-                  <span className="truncate" title={a.name}>{a.name}</span>
+                  <EmployeeName name={a.name} isVip={isVipOf(a.id)} title={a.name} className="truncate" />
                   <span className="shrink-0 tabular-nums text-muted-foreground">{a.count}{a.inProgress ? ` · в работе ${a.inProgress}` : ""}</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-secondary">
@@ -998,7 +998,7 @@ function EmployeeProfile({ employee, onAvatarChanged }: { employee: EmployeeProf
             <EditableProfileAvatar avatarUrl={employee.avatar_url} name={employee.full_name} initials={employee.initials} onUploaded={onAvatarChanged} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{employee.full_name}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl"><EmployeeName name={employee.full_name} isVip={employee.is_vip} /></h1>
                 {director && <span className="rounded-full border border-border bg-secondary px-2.5 py-0.5 text-xs font-medium text-muted-foreground">Директор</span>}
                 {employee.is_vip && <VipBadge />}
               </div>
