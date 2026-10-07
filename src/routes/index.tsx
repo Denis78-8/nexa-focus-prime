@@ -819,9 +819,12 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
   const now = Date.now();
   const time = (value: string | null) => (value ? new Date(value).getTime() : NaN);
 
-  const openTasks = tasks.filter((task) => !CLOSED_STATUSES.has(task.status));
+  // Tasks of completed projects keep their own status but are frozen, so they
+  // do not count as active work (open / in progress / team load).
+  const completedProjects = new Set((data?.projects ?? []).filter((project) => project.status === "completed").map((project) => project.id));
+  const openTasks = tasks.filter((task) => !CLOSED_STATUSES.has(task.status) && !completedProjects.has(task.project_id));
   const createdLastDay = tasks.filter((task) => now - time(task.created_at) < DAY_MS).length;
-  const inProgress = tasks.filter((task) => task.status === "in_progress");
+  const inProgress = openTasks.filter((task) => task.status === "in_progress");
   const runningTaskIds = new Set(running.map((entry) => entry.task_id));
   // Deadline compliance: completed tasks that had a due date; on time when completed_at <= due_at.
   const doneWithDue = tasks.filter((task) => task.status === "done" && task.due_at && task.completed_at);

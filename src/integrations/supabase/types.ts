@@ -376,6 +376,8 @@ export type Database = {
       projects: {
         Row: {
           code: string
+          completed_at: string | null
+          completed_by: string | null
           created_at: string
           description: string | null
           id: string
@@ -386,6 +388,8 @@ export type Database = {
         }
         Insert: {
           code: string
+          completed_at?: string | null
+          completed_by?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -396,6 +400,8 @@ export type Database = {
         }
         Update: {
           code?: string
+          completed_at?: string | null
+          completed_by?: string | null
           created_at?: string
           description?: string | null
           id?: string
@@ -822,6 +828,10 @@ export type Database = {
       mark_all_notifications_read: { Args: never; Returns: number }
       mark_notifications_read: { Args: { _ids: string[] }; Returns: number }
       recalc_parent_progress: { Args: { _parent: string }; Returns: undefined }
+      set_project_status: {
+        Args: { _project_id: string; _status: string }
+        Returns: Json
+      }
       reserve_corporate_mailbox: {
         Args: { _email: string; _local_part: string; _user_id: string }
         Returns: Json

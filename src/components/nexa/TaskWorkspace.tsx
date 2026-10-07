@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Plus, Users, ChevronLeft } from "lucide-react";
+import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Plus, Users, ChevronLeft, MoreHorizontal } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, type Transition } from "motion/react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -18,11 +18,23 @@ import {
   ensureProfile,
   getTaskActivity,
   getWorkspace,
+  setProjectStatus,
   transitionTask,
   updateTask,
 } from "@/lib/tasks.functions";
 import { formatDuration, getNexaSessionId } from "@/lib/nexa-session";
 import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type Action = "start" | "pause" | "resume" | "wait" | "complete" | "reopen";
 
@@ -82,6 +94,7 @@ export function useTaskRealtime(): RealtimeState {
       .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => invalidateTaskData(qc))
       .on("postgres_changes", { event: "*", schema: "public", table: "task_time_entries" }, () => invalidateTaskData(qc))
       .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, () => qc.invalidateQueries({ queryKey: ["nexa", "activity"] }))
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "projects" }, () => void qc.invalidateQueries({ queryKey: WS_KEY }))
       .subscribe((status) => {
         if (status === "SUBSCRIBED") setState("live");
         else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setState("offline");
@@ -146,6 +159,7 @@ function Workspace() {
 
   const filterKey = `${projectId ?? "none"}:${mineOnly ? "mine" : "all"}`;
   const openTotal = data.tasks.filter((t) => t.status !== "done").length;
+  const projectCompleted = isCompleted(project);
   const selectProject = (id: string) => {
     setProjectId(id);
     setTaskId(null);
@@ -192,36 +206,43 @@ function Workspace() {
                   className="h-9 w-full truncate rounded-md border border-border bg-card px-2.5 text-sm"
                 >
                   {data.projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
+                    <option key={p.id} value={p.id}>{p.code} · {p.name}{isCompleted(p) ? " · Завершён" : ""}</option>
                   ))}
                 </select>
               </div>
               <nav className="hidden flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 lg:block">
                 {data.projects.map((p) => {
                   const active = p.id === projectId;
+                  const done = isCompleted(p);
                   const own = data.tasks.filter((t) => t.project_id === p.id);
                   const open = own.filter((t) => t.status !== "done").length;
+                  const count = own.length > 0 ? `${own.length} ${plural(own.length, "задача", "задачи", "задач")}` : "Нет задач";
                   return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => selectProject(p.id)}
-                      aria-current={active ? "true" : undefined}
-                      title={`${p.code} · ${p.name}`}
-                      className={`relative flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors ${active ? "bg-secondary/70" : "hover:bg-secondary/35"}`}
-                    >
-                      {active && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />}
-                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[11px] font-semibold uppercase tracking-wide ${active ? "border-primary/30 bg-primary/[0.08] text-primary" : "border-border bg-card text-muted-foreground"}`}>
-                        {p.code.slice(0, 3)}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className={`line-clamp-2 text-[14px] leading-tight ${active ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>{p.name}</span>
-                        <span className="mt-1 block truncate text-[11px] text-muted-foreground">{own.length > 0 ? `${own.length} ${plural(own.length, "задача", "задачи", "задач")}` : "Нет задач"}</span>
-                      </span>
-                      {open > 0 && (
-                        <span title={`Открытых задач: ${open}`} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${active ? "bg-primary/[0.12] text-primary" : "bg-secondary/70 text-muted-foreground"}`}>{open}</span>
-                      )}
-                    </button>
+                    <div key={p.id} className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => selectProject(p.id)}
+                        aria-current={active ? "true" : undefined}
+                        title={`${p.code} · ${p.name}${done ? ` · ${completedLabel(p)}` : ""}`}
+                        className={`relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-2 pr-9 text-left transition-colors ${active ? "bg-secondary/70" : "hover:bg-secondary/35"}`}
+                      >
+                        {active && <span aria-hidden className={`absolute inset-y-2 left-0 w-0.5 rounded-full ${done ? "bg-foreground/35" : "bg-primary/80"}`} />}
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[11px] font-semibold uppercase tracking-wide ${done ? "border-border bg-secondary/40 text-foreground/55" : active ? "border-primary/30 bg-primary/[0.08] text-primary" : "border-border bg-card text-muted-foreground"}`}>
+                          {p.code.slice(0, 3)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className={`line-clamp-2 text-[14px] leading-tight ${done ? `font-medium ${active ? "text-foreground/85" : "text-foreground/70"}` : active ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>{p.name}</span>
+                          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
+                            {done && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary/70 px-1.5 py-px text-[10px] font-medium text-foreground/65"><CheckCircle2 aria-hidden className="h-2.5 w-2.5" />Завершён</span>}
+                            <span className="truncate">{count}</span>
+                          </span>
+                        </span>
+                        {!done && open > 0 && (
+                          <span title={`Открытых задач: ${open}`} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${active ? "bg-primary/[0.12] text-primary" : "bg-secondary/70 text-muted-foreground"}`}>{open}</span>
+                        )}
+                      </button>
+                      <ProjectMenu project={p} userId={data.userId} className={`absolute right-1.5 top-1/2 -translate-y-1/2 ${active ? "" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"}`} />
+                    </div>
                   );
                 })}
               </nav>
@@ -240,10 +261,20 @@ function Workspace() {
                     <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{project.code}</div>
                     <h2 className="truncate text-base font-semibold tracking-tight" title={project.name}>{project.name}</h2>
                   </div>
-                  <Button size="sm" className="h-8 shrink-0 active:scale-[0.97]" aria-expanded={composerOpen} onClick={() => setComposerOpen((open) => !open)}>
-                    <Plus className="h-4 w-4" />
-                    Задача
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {projectCompleted ? (
+                      <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 text-[11px] font-medium text-foreground/70">
+                        <CheckCircle2 aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
+                        {completedLabel(project)}
+                      </span>
+                    ) : (
+                      <Button size="sm" className="h-8 active:scale-[0.97]" aria-expanded={composerOpen} onClick={() => setComposerOpen((open) => !open)}>
+                        <Plus className="h-4 w-4" />
+                        Задача
+                      </Button>
+                    )}
+                    <ProjectMenu project={project} userId={data.userId} className="lg:hidden" />
+                  </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <div className="relative flex h-8 items-center rounded-md border border-border bg-background/40 p-0.5">
@@ -270,7 +301,7 @@ function Workspace() {
                 </div>
               </div>
               <AnimatePresence initial={false}>
-                {composerOpen && (
+                {composerOpen && !projectCompleted && (
                   <motion.div key="composer" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden border-b border-border">
                     <div className="p-3">
                       <NewTask projectId={project.id} members={membersOf(data, project.id)} parentId={null} />
@@ -280,7 +311,7 @@ function Workspace() {
               </AnimatePresence>
               <AnimatePresence mode="wait" initial={false}>
                 <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="flex-1 p-2">
-                  <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} onCreate={composerOpen ? undefined : () => setComposerOpen(true)} onShowAll={() => setMineOnly(false)} />
+                  <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} onCreate={composerOpen || projectCompleted ? undefined : () => setComposerOpen(true)} onShowAll={() => setMineOnly(false)} completed={projectCompleted} />
                 </motion.div>
               </AnimatePresence>
               <div className="lg:hidden">
@@ -320,6 +351,100 @@ function Workspace() {
         )}
       </div>
     </MotionConfig>
+  );
+}
+
+type Project = WS["projects"][number];
+
+const isCompleted = (project: Project | null | undefined) => project?.status === "completed";
+
+function completedLabel(project: Project) {
+  if (!project.completed_at) return "Завершён";
+  return `Завершён ${new Date(project.completed_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+/**
+ * "⋯" actions for a project: complete or reopen. The menu asks the database
+ * whether the caller may manage this project (can_manage_project); the
+ * set_project_status RPC re-checks rights and state on the backend.
+ */
+function ProjectMenu({ project, userId, className = "" }: { project: Project; userId: string; className?: string }) {
+  const qc = useQueryClient();
+  const changeStatus = useServerFn(setProjectStatus);
+  const completed = isCompleted(project);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const rights = useQuery({
+    queryKey: ["nexa", "project-rights", project.id],
+    staleTime: 60_000,
+    enabled: false,
+    queryFn: async () => {
+      const { data, error } = await (supabase.rpc as unknown as (name: string, args: Record<string, string>) => Promise<{ data: boolean | null; error: { message: string } | null }>)(
+        "can_manage_project", { _project_id: project.id, _user_id: userId },
+      );
+      if (error) throw new Error(error.message);
+      return data === true;
+    },
+  });
+  const m = useMutation({
+    mutationFn: (status: "active" | "completed") => changeStatus({ data: { projectId: project.id, status } }),
+    onSuccess: (_result, status) => {
+      void qc.invalidateQueries({ queryKey: WS_KEY });
+      setConfirmOpen(false);
+      toast.success(status === "completed" ? `Проект ${project.code} завершён` : `Проект ${project.code} снова открыт`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const allowed = rights.data === true;
+  return (
+    <>
+      <DropdownMenu onOpenChange={(open) => { if (open && !rights.data) void rights.refetch(); }}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={`Действия с проектом ${project.code}`}
+            className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${className}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={6} className="w-56 p-1">
+          <div className="truncate px-2 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{project.code} · {project.name}</div>
+          <DropdownMenuItem disabled={!allowed || m.isPending} onSelect={() => setConfirmOpen(true)} className="gap-2.5 rounded-md px-2 py-2 text-[13px]">
+            {completed ? <RotateCcw className="h-4 w-4 text-muted-foreground" /> : <CheckCircle2 className="h-4 w-4 text-muted-foreground" />}
+            {completed ? "Открыть проект заново" : "Завершить проект"}
+          </DropdownMenuItem>
+          {rights.isFetching && <div className="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground">Проверяем права…</div>}
+          {!rights.isFetching && rights.data === false && (
+            <div className="px-2 pb-1.5 pt-0.5 text-[11px] leading-snug text-muted-foreground">Доступно владельцу проекта и руководителям</div>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent className="w-[calc(100%-2rem)] max-w-[26rem] gap-5 rounded-xl p-6">
+          <AlertDialogHeader className="space-y-2.5">
+            <span aria-hidden className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-secondary/50 text-foreground/70 sm:mx-0">
+              {completed ? <RotateCcw className="h-[18px] w-[18px]" /> : <CheckCircle2 className="h-[18px] w-[18px]" />}
+            </span>
+            <AlertDialogTitle className="text-base font-semibold tracking-tight">{completed ? "Открыть проект заново?" : "Завершить проект?"}</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm leading-relaxed">
+              {completed
+                ? "В проекте снова можно будет создавать задачи, запускать таймеры и добавлять участников."
+                : "После завершения новые задачи в проекте создавать нельзя. Все существующие задачи, история и комментарии останутся доступны."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel disabled={m.isPending} className="mt-0 border-border bg-transparent hover:bg-secondary/60">Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={m.isPending}
+              className="bg-foreground text-background hover:bg-foreground/90"
+              onClick={(e) => { e.preventDefault(); m.mutate(completed ? "active" : "completed"); }}
+            >
+              {m.isPending ? "Сохраняем…" : completed ? "Открыть проект" : "Завершить проект"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -427,7 +552,7 @@ function LiveBadge() {
   );
 }
 
-function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data, onCreate, onShowAll }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS; onCreate?: (() => void) | undefined; onShowAll: () => void }) {
+function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data, onCreate, onShowAll, completed = false }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS; onCreate?: (() => void) | undefined; onShowAll: () => void; completed?: boolean }) {
   const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
   if (mineOnly) {
     const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -502,11 +627,21 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
   };
   if (tasks.length === 0 || roots.length === 0) {
     const empty = tasks.length === 0;
+    if (empty && completed)
+      return (
+        <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/25 px-4 py-3.5">
+          <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium">В проекте нет задач</div>
+            <p className="mt-0.5 text-xs text-muted-foreground">Проект завершён — новые задачи не создаются</p>
+          </div>
+        </div>
+      );
     return (
       <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3.5">
         <div className="min-w-0">
           <div className="text-sm font-medium">{empty ? "В проекте пока нет задач" : "Нет задач, назначенных на вас"}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{empty ? "Начните с первой задачи — подзадачи можно добавить позже." : "Остальные задачи проекта — во вкладке «Все задачи»."}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{empty ? (completed ? "Проект завершён — новые задачи не создаются" : "Начните с первой задачи — подзадачи можно добавить позже.") : "Остальные задачи проекта — во вкладке «Все задачи»."}</p>
         </div>
         {empty ? (
           onCreate && <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={onCreate}><Plus className="h-4 w-4" />Создать</Button>
@@ -622,7 +757,8 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
   const qc = useQueryClient();
   const add = useServerFn(addProjectMember);
   const members = membersOf(data, projectId);
-  const others = data.profiles.filter((p) => !members.some((m) => m.id === p.id));
+  // A completed project takes no new members (also enforced by a DB trigger).
+  const others = isCompleted(data.projects.find((p) => p.id === projectId)) ? [] : data.profiles.filter((p) => !members.some((m) => m.id === p.id));
   const [uid, setUid] = useState("");
   // UI-only: the add-member picker stays folded so it does not compete with projects.
   const [adding, setAdding] = useState(false);
@@ -708,10 +844,12 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
     onError: (e: Error) => toast.error(e.message),
   });
 
+  // Completed project: no new timer intervals (enforced by a DB trigger too).
+  const projectDone = isCompleted(data.projects.find((p) => p.id === task.project_id));
   const actions: { a: Action; label: string; icon: React.ReactNode; primary?: boolean }[] = [];
-  if (task.status === "todo") actions.push({ a: "start", label: "Начать", icon: <Play className="h-4 w-4" />, primary: true });
+  if (task.status === "todo" && !projectDone) actions.push({ a: "start", label: "Начать", icon: <Play className="h-4 w-4" />, primary: true });
   if (task.status === "in_progress" && myRunning) actions.push({ a: "pause", label: "Пауза", icon: <Pause className="h-4 w-4" /> });
-  if ((task.status === "in_progress" || task.status === "waiting") && !myRunning)
+  if ((task.status === "in_progress" || task.status === "waiting") && !myRunning && !projectDone)
     actions.push({ a: "resume", label: "Возобновить", icon: <Play className="h-4 w-4" />, primary: true });
   if (task.status === "in_progress") actions.push({ a: "wait", label: "В ожидание", icon: <Hourglass className="h-4 w-4" /> });
   if (task.status === "done") actions.push({ a: "reopen", label: "Переоткрыть", icon: <RotateCcw className="h-4 w-4" /> });
@@ -831,6 +969,13 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
               }}
             </LiveSpent>
           </div>
+          {/* Completed project: start/resume are not offered; say why instead of leaving a gap. */}
+          {projectDone && !myRunning && task.status !== "done" && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-1 text-[11px] text-muted-foreground">
+              <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
+              Проект завершён — таймер недоступен
+            </span>
+          )}
           {(actions.length > 0 || task.status === "in_progress" || task.status === "waiting") && (
             <motion.div layout transition={EASE_OUT} className="flex w-full flex-wrap items-center gap-1 border-t border-border/60 pt-3 sm:w-auto sm:border-t-0 sm:pt-0">
               {actions.map((x) => (
@@ -917,7 +1062,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
       <section className="px-6 py-5">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Подзадачи · {subtasks.length}</h3>
-          {task.status !== "done" && (
+          {task.status !== "done" && !projectDone && (
             <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" aria-expanded={subtaskFormOpen} onClick={() => setSubtaskFormOpen((open) => !open)}>
               <Plus className="h-3.5 w-3.5" />
               Подзадача
@@ -949,7 +1094,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
           </div>
         )}
         <AnimatePresence initial={false}>
-          {task.status !== "done" && subtaskFormOpen && (
+          {task.status !== "done" && !projectDone && subtaskFormOpen && (
             <motion.div key="subtask-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden">
               <div className="mt-2">
                 <NewTask projectId={task.project_id} members={membersOf(data, task.project_id)} parentId={task.id} />

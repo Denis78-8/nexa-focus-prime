@@ -181,3 +181,15 @@ export const addProjectMember = createServerFn({ method: "POST" })
     fail(error);
     return { ok: true };
   });
+
+/** Complete or reopen a project. Rights and state are checked by the set_project_status RPC. */
+export const setProjectStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { projectId: string; status: "active" | "completed" }) =>
+    z.object({ projectId: z.string().uuid(), status: z.enum(["active", "completed"]) }).parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const { error } = await context.supabase.rpc("set_project_status", { _project_id: data.projectId, _status: data.status });
+    fail(error);
+    return { ok: true, status: data.status };
+  });
