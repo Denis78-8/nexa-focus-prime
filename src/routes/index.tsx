@@ -8,8 +8,9 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { STATUS_LABEL, TaskWorkspace } from "@/components/nexa/TaskWorkspace";
+import { STATUS_LABEL, TaskWorkspace, useTaskRealtime } from "@/components/nexa/TaskWorkspace";
 import { getWorkspace } from "@/lib/tasks.functions";
+import { formatDuration } from "@/lib/nexa-session";
 import { BrandLogo } from "@/components/nexa/BrandLogo";
 
 // Heavy tabs load on first open, not with the initial page.
@@ -765,79 +766,134 @@ function SectionTitle({ title, sub }: { title: string; sub: string }) {
 // Same query key as TaskWorkspace, so both screens share one cached copy of
 // the workspace (tasks of projects the user may access under RLS + profiles).
 const WORKSPACE_QUERY_KEY = ["nexa", "workspace"] as const;
-const ACTIVE_STATUSES = new Set(["todo", "in_progress", "waiting"]);
+const CLOSED_STATUSES = new Set(["done", "cancelled"]);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-type OverviewStat = { label: string; value: string; delta: string; empty?: boolean };
+type Kpi = { label: string; value: string | null; caption: string };
+
+/** One KPI tile. A changed value fades in and is briefly tinted; no loops. */
+function KpiCard({ kpi, loading, live }: { kpi: Kpi; loading: boolean; live: boolean }) {
+  const previous = useRef(kpi.value);
+  const [changed, setChanged] = useState(false);
+  useEffect(() => {
+    if (previous.current === kpi.value) return;
+    const first = previous.current === null;
+    previous.current = kpi.value;
+    if (first) return;
+    setChanged(true);
+    const timer = window.setTimeout(() => setChanged(false), 1400);
+    return () => window.clearTimeout(timer);
+  }, [kpi.value]);
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-4 sm:p-5">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-xs leading-tight text-muted-foreground">{kpi.label}</span>
+        {live && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" aria-hidden />}
+      </div>
+      <div className={`mt-2 text-2xl font-semibold tabular-nums tracking-tight transition-colors duration-700 motion-reduce:transition-none sm:mt-3 sm:text-3xl ${kpi.value === null ? "text-muted-foreground" : changed ? "text-primary" : "text-foreground"}`}>
+        {loading ? (
+          <span className="inline-block h-8 w-12 animate-pulse rounded bg-secondary align-middle" />
+        ) : (
+          <span key={kpi.value ?? "none"} className="inline-block animate-in fade-in duration-500 motion-reduce:animate-none">{kpi.value ?? "—"}</span>
+        )}
+      </div>
+      <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground sm:mt-1.5 sm:text-xs">{loading ? "\u00a0" : kpi.caption}</div>
+    </div>
+  );
+}
+
+function signed(n: number) {
+  return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "±0";
+}
 
 function Overview({ go }: { go: (s: ScreenId) => void }) {
   const loadWorkspace = useServerFn(getWorkspace);
   const workspace = useQuery({ queryKey: WORKSPACE_QUERY_KEY, queryFn: () => loadWorkspace() });
+  // Same realtime channel as the Tasks tab: task / timer changes refresh the workspace cache.
+  const realtime = useTaskRealtime();
   const data = workspace.data;
+  const live = realtime === "live" && !workspace.isError;
 
   const tasks = data?.tasks ?? [];
+  const running = data?.running ?? [];
   const now = Date.now();
-  const openTasks = tasks.filter((task) => ACTIVE_STATUSES.has(task.status));
-  const createdLastDay = tasks.filter((task) => now - new Date(task.created_at).getTime() < DAY_MS).length;
-  // Deadline compliance from real fields: completed tasks that had a due date.
-  const completedWithDeadline = tasks.filter((task) => task.status === "done" && task.due_at && task.completed_at);
-  const completedOnTime = completedWithDeadline.filter((task) => new Date(task.completed_at!).getTime() <= new Date(task.due_at!).getTime());
-  const recentTasks = [...tasks].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 4);
+  const time = (value: string | null) => (value ? new Date(value).getTime() : NaN);
 
-  // Team load: active tasks per assignee, as a share of all active assigned tasks.
-  const activeAssigned = openTasks.filter((task) => task.assignee_id);
-  const loadByAssignee = new Map<string, number>();
-  for (const task of activeAssigned) loadByAssignee.set(task.assignee_id!, (loadByAssignee.get(task.assignee_id!) ?? 0) + 1);
+  const openTasks = tasks.filter((task) => !CLOSED_STATUSES.has(task.status));
+  const createdLastDay = tasks.filter((task) => now - time(task.created_at) < DAY_MS).length;
+  const inProgress = tasks.filter((task) => task.status === "in_progress");
+  const runningTaskIds = new Set(running.map((entry) => entry.task_id));
+  // Deadline compliance: completed tasks that had a due date; on time when completed_at <= due_at.
+  const doneWithDue = tasks.filter((task) => task.status === "done" && task.due_at && task.completed_at);
+  const doneOnTime = doneWithDue.filter((task) => time(task.completed_at) <= time(task.due_at));
+  const overdueOpen = openTasks.filter((task) => task.due_at && time(task.due_at) < now).length;
+  // Completed in the last 7 days vs the 7 days before, by completed_at of currently completed tasks.
+  const completedBetween = (from: number, to: number) =>
+    tasks.filter((task) => task.status === "done" && task.completed_at && time(task.completed_at) >= from && time(task.completed_at) < to).length;
+  const doneLast7 = completedBetween(now - 7 * DAY_MS, now + 1);
+  const donePrev7 = completedBetween(now - 14 * DAY_MS, now - 7 * DAY_MS);
+
+  const kpis: Kpi[] = data
+    ? [
+        { label: "Открытые задачи", value: String(openTasks.length), caption: `${signed(createdLastDay)} создано за сутки` },
+        {
+          label: "В работе",
+          value: String(inProgress.length),
+          caption: runningTaskIds.size > 0 ? `Таймер идёт: ${runningTaskIds.size} ${pluralRu(runningTaskIds.size, "задача", "задачи", "задач")}` : "Таймеры не запущены",
+        },
+        doneWithDue.length > 0
+          ? {
+              label: "Соблюдение сроков",
+              value: `${Math.round((doneOnTime.length / doneWithDue.length) * 100)}%`,
+              caption: `${doneOnTime.length} из ${doneWithDue.length} в срок${overdueOpen ? ` · просрочено ${overdueOpen}` : ""}`,
+            }
+          : { label: "Соблюдение сроков", value: null, caption: overdueOpen ? `Нет завершённых со сроком · просрочено ${overdueOpen}` : "Нет завершённых задач со сроком" },
+        { label: "Завершено за 7 дней", value: String(doneLast7), caption: `${signed(doneLast7 - donePrev7)} к прошлым 7 дням` },
+      ]
+    : ["Открытые задачи", "В работе", "Соблюдение сроков", "Завершено за 7 дней"].map((label) => ({ label, value: null, caption: "" }));
+
+  // Latest activity first: updated_at changes on status, timer and field edits.
+  const recentTasks = [...tasks].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 5);
+  const nameOf = (id: string | null) => (id ? data?.profiles.find((profile) => profile.id === id)?.full_name || "Сотрудник" : null);
+
+  // Team load: open tasks per assignee, as a share of all open assigned tasks.
+  const openAssigned = openTasks.filter((task) => task.assignee_id);
+  const loadByAssignee = new Map<string, { count: number; inProgress: number }>();
+  for (const task of openAssigned) {
+    const entry = loadByAssignee.get(task.assignee_id!) ?? { count: 0, inProgress: 0 };
+    entry.count += 1;
+    if (task.status === "in_progress") entry.inProgress += 1;
+    loadByAssignee.set(task.assignee_id!, entry);
+  }
   const teamLoad = [...loadByAssignee.entries()]
-    .map(([id, count]) => ({
-      id,
-      name: data?.profiles.find((profile) => profile.id === id)?.full_name || "Сотрудник",
-      count,
-      share: Math.round((count / activeAssigned.length) * 100),
-    }))
+    .map(([id, entry]) => ({ id, name: nameOf(id) ?? "Сотрудник", ...entry, share: Math.round((entry.count / openAssigned.length) * 100) }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "ru"))
     .slice(0, 5);
 
-  const stats: OverviewStat[] = [
-    {
-      label: "Открытые задачи",
-      value: data ? String(openTasks.length) : "—",
-      delta: data ? `+${createdLastDay} за сутки` : "",
-    },
-    { label: "Среднее время ответа", value: "—", delta: "Нет данных: время ответа не фиксируется", empty: true },
-    completedWithDeadline.length > 0
-      ? {
-          label: "Соблюдение сроков",
-          value: `${Math.round((completedOnTime.length / completedWithDeadline.length) * 100)}%`,
-          delta: `${completedOnTime.length} из ${completedWithDeadline.length} завершены в срок`,
-        }
-      : { label: "Соблюдение сроков", value: "—", delta: "Нет данных: нет завершённых задач со сроком", empty: true },
-    { label: "CSAT", value: "—", delta: "Нет данных: оценки клиентов не собираются", empty: true },
-  ];
+  const updatedAt = workspace.dataUpdatedAt ? new Date(workspace.dataUpdatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : null;
 
   return (
     <div>
-      <SectionTitle title="Обзор" sub="Ключевые показатели по задачам, доступным вам" />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <SectionTitle title="Обзор" sub="Задачи проектов, доступных вам" />
+        <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground" role="status" aria-live="polite">
+          <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-primary" : realtime === "connecting" ? "bg-muted-foreground/60" : "bg-destructive/80"}`} aria-hidden />
+          <span className={live ? "font-medium tracking-wider text-foreground/80" : ""}>{live ? "LIVE" : realtime === "connecting" ? "Подключение…" : "Нет связи"}</span>
+          {updatedAt && <span>· обновлено {updatedAt}</span>}
+        </div>
+      </div>
       {workspace.error && (
         <p role="alert" className="mb-4 rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
           Не удалось загрузить данные: {(workspace.error as Error).message}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-lg border border-border bg-card p-5">
-            <div className="text-xs text-muted-foreground">{s.label}</div>
-            <div className={`mt-3 text-3xl font-semibold tracking-tight ${s.empty ? "text-muted-foreground" : ""}`}>
-              {workspace.isLoading && !s.empty ? <span className="inline-block h-8 w-12 animate-pulse rounded bg-secondary align-middle" /> : s.value}
-            </div>
-            <div className="mt-1.5 text-xs text-muted-foreground">{s.delta}</div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {kpis.map((kpi) => <KpiCard key={kpi.label} kpi={kpi} loading={workspace.isLoading} live={live} />)}
       </div>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
         <div className="rounded-lg border border-border bg-card p-5 lg:col-span-2">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium">Последние задачи</h2>
             <button type="button" onClick={() => go("tickets")} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
               Открыть задачи →
@@ -846,15 +902,22 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
           {workspace.isLoading ? (
             <p className="py-2.5 text-sm text-muted-foreground">Загрузка задач…</p>
           ) : recentTasks.length === 0 ? (
-            <p className="py-2.5 text-sm text-muted-foreground">Задач пока нет.</p>
+            <p className="py-2.5 text-sm text-muted-foreground">Задач пока нет. Они появятся здесь, как только их создадут в проектах.</p>
           ) : (
             <div className="divide-y divide-border">
               {recentTasks.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 py-2.5 text-sm">
-                  <span className="w-20 font-mono text-xs text-muted-foreground">#{t.number}</span>
-                  <span className="flex-1 truncate" title={t.title}>{t.title}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass(t.status)}`}>{STATUS_LABEL[t.status] ?? t.status}</span>
-                </div>
+                <button key={t.id} type="button" onClick={() => go("tickets")} className="flex w-full items-center gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground">
+                  <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">#{t.number}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate" title={t.title}>{t.title}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {nameOf(t.assignee_id) ?? "Без исполнителя"}
+                      {runningTaskIds.has(t.id) && <span className="text-primary"> · таймер идёт</span>}
+                    </span>
+                  </span>
+                  <span className="hidden shrink-0 font-mono text-xs tabular-nums text-muted-foreground sm:block">{formatDuration(t.spent_seconds)}</span>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] ${statusClass(t.status)}`}>{STATUS_LABEL[t.status] ?? t.status}</span>
+                </button>
               ))}
             </div>
           )}
@@ -864,25 +927,33 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
           {workspace.isLoading ? (
             <p className="text-sm text-muted-foreground">Загрузка…</p>
           ) : teamLoad.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Нет сотрудников с активными задачами.</p>
+            <p className="text-sm text-muted-foreground">Нет открытых задач с исполнителем.</p>
           ) : (
             teamLoad.map((a) => (
               <div key={a.id} className="mb-3">
                 <div className="mb-1 flex justify-between gap-3 text-xs">
                   <span className="truncate" title={a.name}>{a.name}</span>
-                  <span className="shrink-0 text-muted-foreground">{a.count} · {a.share}%</span>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">{a.count}{a.inProgress ? ` · в работе ${a.inProgress}` : ""}</span>
                 </div>
                 <div className="h-1.5 rounded-full bg-secondary">
-                  <div className="h-1.5 rounded-full bg-primary" style={{ width: `${a.share}%` }} />
+                  <div className="h-1.5 rounded-full bg-primary/80 transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${a.share}%` }} />
                 </div>
               </div>
             ))
           )}
-          {teamLoad.length > 0 && <p className="mt-2 text-[11px] text-muted-foreground">Доля активных назначенных задач</p>}
+          {teamLoad.length > 0 && <p className="mt-2 text-[11px] text-muted-foreground">Открытые задачи на сотрудника · доля от всех назначенных</p>}
         </div>
       </div>
     </div>
   );
+}
+
+function pluralRu(n: number, one: string, few: string, many: string) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function Tickets() {

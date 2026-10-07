@@ -65,6 +65,34 @@ function useNow(active: boolean) {
   return now;
 }
 
+export type RealtimeState = "connecting" | "live" | "offline";
+
+/**
+ * The single realtime subscription for task data, shared by the Tasks tab and
+ * Overview (only one of them is mounted at a time, so there is one channel).
+ * Changes refresh only the workspace and task activity caches (P1). Returns
+ * the actual channel state for the LIVE indicator.
+ */
+export function useTaskRealtime(): RealtimeState {
+  const qc = useQueryClient();
+  const [state, setState] = useState<RealtimeState>("connecting");
+  useEffect(() => {
+    const ch = supabase
+      .channel("nexa-tasks")
+      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => invalidateTaskData(qc))
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_time_entries" }, () => invalidateTaskData(qc))
+      .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, () => qc.invalidateQueries({ queryKey: ["nexa", "activity"] }))
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") setState("live");
+        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setState("offline");
+      });
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [qc]);
+  return state;
+}
+
 export function TaskWorkspace() {
   const { session, loading } = useAuth();
   if (loading) return <div className="text-sm text-muted-foreground">Загрузка…</div>;
@@ -95,18 +123,7 @@ function Workspace() {
 
   const ws = useQuery({ queryKey: WS_KEY, queryFn: () => fetchWs(), enabled: ready });
 
-  // Realtime: любое изменение в БД обновляет единый кэш рабочего пространства
-  useEffect(() => {
-    const ch = supabase
-      .channel("nexa-tasks")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => invalidateTaskData(qc))
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_time_entries" }, () => invalidateTaskData(qc))
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, () => qc.invalidateQueries({ queryKey: ["nexa", "activity"] }))
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [qc]);
+  useTaskRealtime();
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
