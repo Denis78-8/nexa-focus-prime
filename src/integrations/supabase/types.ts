@@ -175,6 +175,48 @@ export type Database = {
         }
         Relationships: []
       }
+      knowledge_base_articles: {
+        Row: {
+          category: string
+          created_at: string
+          created_by: string
+          id: string
+          important_notes: string[]
+          related_articles: string[]
+          sections: Json
+          summary: string
+          title: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          important_notes?: string[]
+          related_articles?: string[]
+          sections?: Json
+          summary?: string
+          title: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          important_notes?: string[]
+          related_articles?: string[]
+          sections?: Json
+          summary?: string
+          title?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       mailbox_audit_events: {
         Row: {
           action: Database["public"]["Enums"]["mailbox_audit_action"]
@@ -825,6 +867,7 @@ export type Database = {
         Returns: boolean
       }
       is_active_user: { Args: { _user_id: string }; Returns: boolean }
+      kb_sections_valid: { Args: { _sections: Json }; Returns: boolean }
       mark_all_notifications_read: { Args: never; Returns: number }
       mark_notifications_read: { Args: { _ids: string[] }; Returns: number }
       project_is_completed: { Args: { _project_id: string }; Returns: boolean }

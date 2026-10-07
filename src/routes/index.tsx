@@ -4,8 +4,8 @@ import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from "re
 import {
   AtSign,
   Check,
+  ListChecks,
   LogOut,
-  MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { STATUS_LABEL, TaskWorkspace, useTaskRealtime } from "@/components/nexa/TaskWorkspace";
@@ -147,6 +147,11 @@ function statusClass(status: string) {
 
 function NexaPrototype() {
   const [active, setActive] = useState<ScreenId>("overview");
+  // "Задачи сотрудника" from the profile opens Tasks pre-filtered to "Мои задачи".
+  const [tasksMineOnly, setTasksMineOnly] = useState(false);
+  useEffect(() => {
+    if (active !== "tickets") setTasksMineOnly(false);
+  }, [active]);
   const [adminOpen, setAdminOpen] = useState(false);
   const [newRequestStep, setNewRequestStep] = useState<"closed" | "choose" | "access">("closed");
   const [accessRequestsVersion, setAccessRequestsVersion] = useState(0);
@@ -529,11 +534,11 @@ function NexaPrototype() {
         <Suspense fallback={<TabLoading />}>
         {adminOpen ? <AdminPanel onEmployeeSaved={refreshProfileAfterEmployeeSave} /> : active === "overview" && <Overview go={setActive} />}
         {!adminOpen && active === "employees" && <EmployeeDirectory />}
-        {!adminOpen && active === "tickets" && <Tickets />}
+        {!adminOpen && active === "tickets" && <Tickets initialMineOnly={tasksMineOnly} />}
         {!adminOpen && active === "knowledge" && <KnowledgeBase />}
         {!adminOpen && active === "notifications" && currentProfile && <AccessNotifications key={accessRequestsVersion} profile={currentProfile} />}
         {!adminOpen && active === "settings" && currentProfile && <SettingsPanel profile={currentProfile} unreadNotifications={unreadNotifications} onOpenNotifications={() => setActive("notifications")} />}
-        {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} onAvatarChanged={refreshAfterAvatarChange} />}
+        {!adminOpen && active === "profile" && currentProfile && <EmployeeProfile employee={currentProfile} onAvatarChanged={refreshAfterAvatarChange} onOpenTasks={() => { setTasksMineOnly(true); setActive("tickets"); }} />}
         </Suspense>
       </main>
 
@@ -959,15 +964,15 @@ function pluralRu(n: number, one: string, few: string, many: string) {
   return many;
 }
 
-function Tickets() {
+function Tickets({ initialMineOnly = false }: { initialMineOnly?: boolean }) {
   return (
     <div className="animate-fade-in">
-      <TaskWorkspace />
+      <TaskWorkspace initialMineOnly={initialMineOnly} />
     </div>
   );
 }
 
-function EmployeeProfile({ employee, onAvatarChanged }: { employee: EmployeeProfileData; onAvatarChanged: () => Promise<void> }) {
+function EmployeeProfile({ employee, onAvatarChanged, onOpenTasks }: { employee: EmployeeProfileData; onAvatarChanged: () => Promise<void>; onOpenTasks: () => void }) {
   const [contactCopied, setContactCopied] = useState(false);
 
   const copyContact = async () => {
@@ -1018,9 +1023,9 @@ function EmployeeProfile({ employee, onAvatarChanged }: { employee: EmployeeProf
               {contactCopied ? <Check /> : <AtSign />}
               {contactCopied ? "Скопировано" : "Скопировать email"}
             </Button>
-            <Button className="active:scale-[0.98]">
-              <MessageSquare />
-              Написать
+            <Button className="active:scale-[0.98]" onClick={onOpenTasks}>
+              <ListChecks />
+              Задачи сотрудника
             </Button>
           </div>
         </div>

@@ -546,7 +546,7 @@ export const KB_ARTICLES: KbArticle[] = [
   },
 ];
 
-function articleText(article: KbArticle) {
+export function articleText(article: KbArticle) {
   const blockText = (block: KbBlock) => ("items" in block ? block.items.join(" ") : "text" in block ? block.text : block.code);
   return [
     article.title,

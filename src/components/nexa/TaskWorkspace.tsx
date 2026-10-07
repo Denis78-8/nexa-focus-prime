@@ -107,7 +107,7 @@ export function useTaskRealtime(): RealtimeState {
   return state;
 }
 
-export function TaskWorkspace() {
+export function TaskWorkspace({ initialMineOnly = false }: { initialMineOnly?: boolean }) {
   const { session, loading } = useAuth();
   if (loading) return <div className="text-sm text-muted-foreground">Загрузка…</div>;
   if (!session)
@@ -120,10 +120,10 @@ export function TaskWorkspace() {
         </Button>
       </div>
     );
-  return <Workspace />;
+  return <Workspace initialMineOnly={initialMineOnly} />;
 }
 
-function Workspace() {
+function Workspace({ initialMineOnly }: { initialMineOnly: boolean }) {
   const qc = useQueryClient();
   const fetchWs = useServerFn(getWorkspace);
   const ensure = useServerFn(ensureProfile);
@@ -141,7 +141,7 @@ function Workspace() {
 
   const [projectId, setProjectId] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [mineOnly, setMineOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(initialMineOnly);
   // UI-only: whether the "new task" composer is expanded.
   const [composerOpen, setComposerOpen] = useState(false);
   const data = ws.data;
