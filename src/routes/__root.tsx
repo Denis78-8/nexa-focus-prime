@@ -15,6 +15,7 @@ import { applyUiPreferences, readUiPreferences } from "@/lib/ui-preferences";
 import appCss from "../styles.css?url";
 import { AmbientFlowBackground } from "@/components/nexa/AmbientFlowBackground";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { useClearCacheOnUserChange } from "@/hooks/useClearCacheOnUserChange";
 
 function NotFoundComponent() {
   return (
@@ -127,6 +128,7 @@ function RootComponent() {
   useEffect(() => {
     applyUiPreferences(readUiPreferences());
   }, []);
+  useClearCacheOnUserChange(queryClient);
 
   return (
     <QueryClientProvider client={queryClient}>

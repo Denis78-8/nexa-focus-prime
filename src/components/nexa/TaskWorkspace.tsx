@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Plus, Users, ChevronLeft, MoreHorizontal } from "lucide-react";
@@ -37,27 +37,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+export { STATUS_LABEL, useTaskRealtime, type RealtimeState } from "@/components/nexa/task-data";
+import { STATUS_LABEL, WS_KEY, invalidateTaskData, useTaskRealtime } from "@/components/nexa/task-data";
+
 type Action = "start" | "pause" | "resume" | "wait" | "complete" | "reopen";
 
-export const STATUS_LABEL: Record<string, string> = {
-  todo: "Новая",
-  in_progress: "В работе",
-  waiting: "В ожидании",
-  done: "Завершена",
-};
 const PRIORITY_LABEL: Record<string, string> = { low: "Низкий", medium: "Средний", high: "Высокий", critical: "Критический" };
-const WS_KEY = ["nexa", "workspace"] as const;
-
-/**
- * Task and timer changes affect only the workspace (tasks, timers, Overview
- * share this key) and task activity (history is written by a tasks trigger).
- * Directory, notifications and avatar URLs do not depend on tasks.
- */
-function invalidateTaskData(qc: QueryClient) {
-  void qc.invalidateQueries({ queryKey: WS_KEY });
-  void qc.invalidateQueries({ queryKey: ["nexa", "activity"] });
-}
-
 // Motion presets: short, soft and purely presentational. MotionConfig below
 // honours prefers-reduced-motion, which drops the transform part of each.
 const EASE_OUT: Transition = { duration: 0.24, ease: [0.22, 1, 0.36, 1] };
@@ -70,41 +55,19 @@ function initialsOf(name: string) {
 
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
+  // When a timer starts, re-sync before the first paint: the stored value is
+  // as old as the last stop, and would briefly show less time than elapsed.
+  const [wasActive, setWasActive] = useState(active);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (active) setNow(Date.now());
+  }
   useEffect(() => {
     if (!active) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [active]);
   return now;
-}
-
-export type RealtimeState = "connecting" | "live" | "offline";
-
-/**
- * The single realtime subscription for task data, shared by the Tasks tab and
- * Overview (only one of them is mounted at a time, so there is one channel).
- * Changes refresh only the workspace and task activity caches (P1). Returns
- * the actual channel state for the LIVE indicator.
- */
-export function useTaskRealtime(): RealtimeState {
-  const qc = useQueryClient();
-  const [state, setState] = useState<RealtimeState>("connecting");
-  useEffect(() => {
-    const ch = supabase
-      .channel("nexa-tasks")
-      .on("postgres_changes", { event: "*", schema: "public", table: "tasks" }, () => invalidateTaskData(qc))
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_time_entries" }, () => invalidateTaskData(qc))
-      .on("postgres_changes", { event: "*", schema: "public", table: "task_comments" }, () => qc.invalidateQueries({ queryKey: ["nexa", "activity"] }))
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "projects" }, () => void qc.invalidateQueries({ queryKey: WS_KEY }))
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") setState("live");
-        else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") setState("offline");
-      });
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [qc]);
-  return state;
 }
 
 export function TaskWorkspace({ initialMineOnly = false }: { initialMineOnly?: boolean }) {
@@ -120,20 +83,29 @@ export function TaskWorkspace({ initialMineOnly = false }: { initialMineOnly?: b
         </Button>
       </div>
     );
-  return <Workspace initialMineOnly={initialMineOnly} />;
+  return <Workspace initialMineOnly={initialMineOnly} userId={session.user.id} />;
 }
 
-function Workspace({ initialMineOnly }: { initialMineOnly: boolean }) {
+function Workspace({ initialMineOnly, userId }: { initialMineOnly: boolean; userId: string }) {
   const qc = useQueryClient();
   const fetchWs = useServerFn(getWorkspace);
   const ensure = useServerFn(ensureProfile);
-  const [ready, setReady] = useState(false);
 
+  // ensure_my_profile runs once per signed-in user: the result stays cached
+  // for the session (the whole cache is dropped on sign-out or a user change),
+  // so reopening the tab does not wait for it again. The workspace query
+  // starts only after it succeeded, so there is no race on a first visit.
+  const ensured = useQuery({
+    queryKey: ["nexa", "ensure-profile", userId],
+    queryFn: () => ensure({ data: {} }),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
   useEffect(() => {
-    ensure({ data: {} })
-      .then(() => setReady(true))
-      .catch((e: Error) => toast.error(e.message));
-  }, [ensure]);
+    if (ensured.error) toast.error((ensured.error as Error).message);
+  }, [ensured.error]);
+  const ready = ensured.isSuccess;
 
   const ws = useQuery({ queryKey: WS_KEY, queryFn: () => fetchWs(), enabled: ready });
 
@@ -150,7 +122,8 @@ function Workspace({ initialMineOnly }: { initialMineOnly: boolean }) {
     if (data && !projectId && data.projects[0]) setProjectId(data.projects[0].id);
   }, [data, projectId]);
 
-  if (!ready || ws.isLoading) return <div className="text-sm text-muted-foreground">Загрузка рабочего пространства…</div>;
+  // Cached workspace data of the current user is shown at once.
+  if (!ws.data && (!ready || ws.isLoading)) return <div className="text-sm text-muted-foreground">Загрузка рабочего пространства…</div>;
   if (ws.error) return <div className="text-sm text-destructive">{(ws.error as Error).message}</div>;
   if (!data) return null;
 
@@ -310,7 +283,9 @@ function Workspace({ initialMineOnly }: { initialMineOnly: boolean }) {
                   </motion.div>
                 )}
               </AnimatePresence>
-              <AnimatePresence mode="wait" initial={false}>
+              {/* presenceAffectsLayout off: otherwise the presence context is
+                  recreated on every render and re-renders each memoized row. */}
+              <AnimatePresence mode="wait" initial={false} presenceAffectsLayout={false}>
                 <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="flex-1 p-2">
                   <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} onCreate={composerOpen || projectCompleted ? undefined : () => setComposerOpen(true)} onShowAll={() => setMineOnly(false)} completed={projectCompleted} />
                 </motion.div>
@@ -526,6 +501,32 @@ function nameOf(data: WS, id: string | null) {
   return p?.full_name || "Сотрудник";
 }
 
+/** Who is running a timer on the task right now (running.user_id, not the assignee). */
+function workersOf(data: WS, taskId: string) {
+  return [...new Set(data.running.filter((r) => r.task_id === taskId).map((r) => r.user_id))];
+}
+
+/** Shows "Профиль недоступен" when a user id exists but its profile was not returned (RLS). */
+function PersonOrUnavailable({ data, id, className = "", short = false }: { data: WS; id: string; className?: string; short?: boolean }) {
+  if (!data.profiles.some((p) => p.id === id)) return <span className={`text-muted-foreground ${className}`}>Профиль недоступен</span>;
+  return <PersonName data={data} id={id} className={className} short={short} />;
+}
+
+/**
+ * Displayed progress per task kind:
+ *  - done → 100%;
+ *  - has subtasks → stored progress (computed from subtasks by the DB);
+ *  - leaf with an estimate → time progress, min(100, liveSpent / estimate);
+ *  - leaf without an estimate → stored manual progress, or null when it is 0
+ *    (the UI then says "Оценка не задана" instead of a false 0%).
+ */
+function displayedProgress(task: Task, hasSubtasks: boolean, spent: number): { value: number | null; source: "done" | "subtasks" | "time" | "manual" } {
+  if (task.status === "done") return { value: 100, source: "done" };
+  if (hasSubtasks) return { value: task.progress, source: "subtasks" };
+  if (task.estimated_seconds > 0) return { value: Math.min(100, Math.floor((spent / task.estimated_seconds) * 100)), source: "time" };
+  return { value: task.progress > 0 ? task.progress : null, source: "manual" };
+}
+
 function toLocalDateTime(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
@@ -560,71 +561,143 @@ function LiveBadge() {
   );
 }
 
+const NO_TASKS: Task[] = [];
+
+type Profile = WS["profiles"][number];
+
+/**
+ * One row of the task tree. Memoized: props are the task object (kept stable
+ * by React Query structural sharing while unchanged) and primitives, so a
+ * change of one task, the selection or another task's timer does not
+ * re-render the other rows.
+ */
+const TaskRow = memo(function TaskRow({ task: t, depth, selected, onSelect, assignee, profiles, runningStarts, workerIds, childDone, childTotal }: {
+  task: Task; depth: number; selected: boolean; onSelect: (id: string) => void; assignee: Profile | null; profiles: WS["profiles"];
+  runningStarts: string; workerIds: string; childDone: number; childTotal: number;
+}) {
+  const live = runningStarts !== "";
+  const running = useMemo<WS["running"]>(
+    () => (live ? runningStarts.split("|").map((started_at, i) => ({ id: `${t.id}:${i}`, task_id: t.id, user_id: "", session_id: "", started_at })) : []),
+    [live, runningStarts, t.id],
+  );
+  const due = dueLabel(t);
+  const urgent = t.priority === "high" || t.priority === "critical";
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onSelect(t.id)}
+      whileTap={{ scale: 0.995 }}
+      aria-current={selected ? "true" : undefined}
+      title={t.title}
+      className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-200 ${selected ? "" : "hover:bg-secondary/35"}`}
+    >
+      {selected && (
+        <motion.span layoutId="task-selection" transition={SOFT_SPRING} className="absolute inset-0 rounded-lg bg-secondary/70 shadow-[inset_0_0_0_1px_oklch(1_0_0/0.06)]">
+          <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />
+        </motion.span>
+      )}
+      <span className="relative mt-0.5 flex h-5 w-4 shrink-0 items-center justify-center"><StatusIcon status={t.status} /></span>
+      <span className="relative min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="shrink-0 font-mono text-[11px] text-muted-foreground/65">#{t.number}</span>
+          <span className={`truncate leading-5 ${depth > 0 ? "text-[13px]" : "text-[14px]"} ${t.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : selected ? "font-medium text-foreground" : depth > 0 ? "text-foreground/85" : "font-medium text-foreground/95"}`}>{t.title}</span>
+        </span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-x-2.5 text-[11px] leading-4 text-muted-foreground/75">
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            {assignee ? (
+              <ProfileAvatar avatarUrl={assignee.avatar_url} name={assignee.full_name || "Сотрудник"} initials={initialsOf(assignee.full_name || "С")} className="h-4 w-4 rounded-full" fallbackClassName="text-[8px]" />
+            ) : (
+              <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border" />
+            )}
+            {assignee ? <EmployeeName name={shortName(assignee.full_name || "Сотрудник")} isVip={assignee.is_vip} title={assignee.full_name ?? undefined} className="truncate" /> : <span className="truncate">{t.assignee_id ? "Профиль недоступен" : "Без исполнителя"}</span>}
+          </span>
+          {live && <LiveBadge />}
+          {live && (
+            <span className="inline-flex min-w-0 items-center gap-1 truncate" title="Сейчас работает">
+              {workerIds.split("|").map((id, i) => {
+                const worker = profiles.find((p) => p.id === id);
+                return (
+                  <span key={id} className="truncate">
+                    {i > 0 && ", "}
+                    {worker ? <EmployeeName name={shortName(worker.full_name || "Сотрудник")} isVip={worker.is_vip} title={worker.full_name || "Сотрудник"} /> : <span className="text-muted-foreground">Профиль недоступен</span>}
+                  </span>
+                );
+              })}
+            </span>
+          )}
+          {urgent && <span className={`shrink-0 ${t.priority === "critical" ? "text-destructive/85" : "text-amber-300/70"}`}>{PRIORITY_LABEL[t.priority]}</span>}
+          {due && <span className={`shrink-0 ${due.overdue ? "text-destructive/85" : "hidden sm:inline"}`}>до {due.text}</span>}
+          {childTotal > 0 && (
+            <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" title="Подзадачи: готово / всего"><CornerDownRight className="h-3 w-3" />{childDone}/{childTotal}</span>
+          )}
+        </span>
+      </span>
+      <span className="relative hidden shrink-0 pt-0.5 text-right sm:block">
+        <span className={`block font-mono text-[11px] tabular-nums ${live ? "text-foreground/90" : "text-muted-foreground/65"}`}><LiveSpent task={t} running={running}>{(spent) => formatDuration(spent)}</LiveSpent></span>
+      </span>
+      <span className="sr-only">{STATUS_LABEL[t.status]}</span>
+    </motion.button>
+  );
+});
+
 function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data, onCreate, onShowAll, completed = false }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS; onCreate?: (() => void) | undefined; onShowAll: () => void; completed?: boolean }) {
-  const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
-  if (mineOnly) {
+  // Derived tree data is recomputed only when the task list or the filter
+  // changes, not on every render (selection, timer, profile updates).
+  const { roots, childrenOf } = useMemo(() => {
+    const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
     const byId = new Map(tasks.map((t) => [t.id, t]));
-    for (const task of tasks) {
-      if (task.assignee_id !== userId) continue;
-      let parentId = task.parent_task_id;
-      while (parentId) {
-        visibleIds.add(parentId);
-        parentId = byId.get(parentId)?.parent_task_id ?? null;
+    if (mineOnly) {
+      for (const task of tasks) {
+        if (task.assignee_id !== userId) continue;
+        let parentId = task.parent_task_id;
+        while (parentId) {
+          visibleIds.add(parentId);
+          parentId = byId.get(parentId)?.parent_task_id ?? null;
+        }
       }
     }
-  }
-  const roots = tasks.filter((t) => visibleIds.has(t.id) && (!t.parent_task_id || !tasks.some((x) => x.id === t.parent_task_id)));
-  const childrenOf = (id: string) => tasks.filter((c) => visibleIds.has(c.id) && c.parent_task_id === id);
+    const children = new Map<string, Task[]>();
+    const rootList: Task[] = [];
+    for (const t of tasks) {
+      if (!visibleIds.has(t.id)) continue;
+      if (t.parent_task_id && byId.has(t.parent_task_id)) {
+        const list = children.get(t.parent_task_id);
+        if (list) list.push(t);
+        else children.set(t.parent_task_id, [t]);
+      } else rootList.push(t);
+    }
+    return { roots: rootList, childrenOf: (id: string) => children.get(id) ?? NO_TASKS };
+  }, [tasks, mineOnly, userId]);
+  // Per-task running state as stable primitives, so a memoized row re-renders
+  // only when its own timers change.
+  const runningByTask = useMemo(() => {
+    const map = new Map<string, { starts: string; workers: string }>();
+    for (const r of running) {
+      const entry = map.get(r.task_id);
+      if (entry) {
+        entry.starts += `|${r.started_at}`;
+        if (!entry.workers.split("|").includes(r.user_id)) entry.workers += `|${r.user_id}`;
+      } else map.set(r.task_id, { starts: r.started_at, workers: r.user_id });
+    }
+    return map;
+  }, [running]);
   const render = (t: Task, depth: number): React.ReactNode => {
-    const selected = t.id === selectedId;
-    const live = running.some((r) => r.task_id === t.id);
     const children = childrenOf(t.id);
-    const assignee = t.assignee_id ? data.profiles.find((p) => p.id === t.assignee_id) : null;
-    const due = dueLabel(t);
-    const urgent = t.priority === "high" || t.priority === "critical";
+    const live = runningByTask.get(t.id);
     return (
       <div key={t.id}>
-        <motion.button
-          type="button"
-          onClick={() => onSelect(t.id)}
-          whileTap={{ scale: 0.995 }}
-          aria-current={selected ? "true" : undefined}
-          title={t.title}
-          className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-200 ${selected ? "" : "hover:bg-secondary/35"}`}
-        >
-          {selected && (
-            <motion.span layoutId="task-selection" transition={SOFT_SPRING} className="absolute inset-0 rounded-lg bg-secondary/70 shadow-[inset_0_0_0_1px_oklch(1_0_0/0.06)]">
-              <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />
-            </motion.span>
-          )}
-          <span className="relative mt-0.5 flex h-5 w-4 shrink-0 items-center justify-center"><StatusIcon status={t.status} /></span>
-          <span className="relative min-w-0 flex-1">
-            <span className="flex items-baseline gap-2">
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground/65">#{t.number}</span>
-              <span className={`truncate leading-5 ${depth > 0 ? "text-[13px]" : "text-[14px]"} ${t.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : selected ? "font-medium text-foreground" : depth > 0 ? "text-foreground/85" : "font-medium text-foreground/95"}`}>{t.title}</span>
-            </span>
-            <span className="mt-0.5 flex min-w-0 items-center gap-x-2.5 text-[11px] leading-4 text-muted-foreground/75">
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                {assignee ? (
-                  <ProfileAvatar avatarUrl={assignee.avatar_url} name={assignee.full_name || "Сотрудник"} initials={initialsOf(assignee.full_name || "С")} className="h-4 w-4 rounded-full" fallbackClassName="text-[8px]" />
-                ) : (
-                  <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border" />
-                )}
-                {assignee ? <EmployeeName name={shortName(assignee.full_name || "Сотрудник")} isVip={assignee.is_vip} title={assignee.full_name ?? undefined} className="truncate" /> : <span className="truncate">Без исполнителя</span>}
-              </span>
-              {live && <LiveBadge />}
-              {urgent && <span className={`shrink-0 ${t.priority === "critical" ? "text-destructive/85" : "text-amber-300/70"}`}>{PRIORITY_LABEL[t.priority]}</span>}
-              {due && <span className={`shrink-0 ${due.overdue ? "text-destructive/85" : "hidden sm:inline"}`}>до {due.text}</span>}
-              {children.length > 0 && (
-                <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" title="Подзадачи: готово / всего"><CornerDownRight className="h-3 w-3" />{children.filter((c) => c.status === "done").length}/{children.length}</span>
-              )}
-            </span>
-          </span>
-          <span className="relative hidden shrink-0 pt-0.5 text-right sm:block">
-            <span className={`block font-mono text-[11px] tabular-nums ${live ? "text-foreground/90" : "text-muted-foreground/65"}`}><LiveSpent task={t} running={running}>{(spent) => formatDuration(spent)}</LiveSpent></span>
-          </span>
-          <span className="sr-only">{STATUS_LABEL[t.status]}</span>
-        </motion.button>
+        <TaskRow
+          task={t}
+          depth={depth}
+          selected={t.id === selectedId}
+          onSelect={onSelect}
+          assignee={t.assignee_id ? data.profiles.find((p) => p.id === t.assignee_id) ?? null : null}
+          profiles={data.profiles}
+          runningStarts={live?.starts ?? ""}
+          workerIds={live?.workers ?? ""}
+          childDone={children.filter((c) => c.status === "done").length}
+          childTotal={children.length}
+        />
         {children.length > 0 && (
           <div className="relative ml-[1.25rem] border-l border-border pl-2">
             {children.map((c) => render(c, depth + 1))}
@@ -813,7 +886,40 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
   );
 }
 
-function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: (id: string) => void }) {
+type TaskDetailProps = { task: Task; data: WS; onSelect: (id: string) => void };
+
+/**
+ * TaskDetail reads only the slices of the workspace compared here: the task
+ * itself, its subtasks and parent, its running timers, profiles, projects,
+ * members, the user id and task titles (history labels). Task objects stay
+ * referentially stable while unchanged (React Query structural sharing), so a
+ * change of another task or another task's timer does not re-render it.
+ */
+function sameTaskDetailInputs(prev: TaskDetailProps, next: TaskDetailProps) {
+  if (prev.task !== next.task || prev.onSelect !== next.onSelect) return false;
+  const a = prev.data;
+  const b = next.data;
+  if (a === b) return true;
+  if (a.userId !== b.userId || a.profiles !== b.profiles || a.projects !== b.projects || a.members !== b.members) return false;
+  const id = next.task.id;
+  const runA = a.running.filter((r) => r.task_id === id);
+  const runB = b.running.filter((r) => r.task_id === id);
+  if (runA.length !== runB.length || runA.some((r, i) => r !== runB[i])) return false;
+  if (a.tasks.length !== b.tasks.length) return false;
+  for (let i = 0; i < b.tasks.length; i += 1) {
+    const x = a.tasks[i]!;
+    const y = b.tasks[i]!;
+    if (x === y) continue;
+    // Another task changed: relevant only as a subtask, the parent, or a title shown in history.
+    if (x.id !== y.id || x.title !== y.title) return false;
+    if (y.parent_task_id === id || x.parent_task_id === id || y.id === next.task.parent_task_id) return false;
+  }
+  return true;
+}
+
+const TaskDetail = memo(TaskDetailView, sameTaskDetailInputs);
+
+function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
   const qc = useQueryClient();
   const transition = useServerFn(transitionTask);
   const update = useServerFn(updateTask);
@@ -914,8 +1020,17 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             ) : (
               <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" />
             )}
-            {task.assignee_id ? <PersonName data={data} id={task.assignee_id} className="min-w-0 break-words" /> : <span className="min-w-0 text-muted-foreground">Не назначен</span>}
+            {task.assignee_id ? <PersonOrUnavailable data={data} id={task.assignee_id} className="min-w-0 break-words" /> : <span className="min-w-0 text-muted-foreground">Без исполнителя</span>}
           </dd>
+          {timerLive && (
+            <>
+              <dt className="text-xs leading-6 text-muted-foreground">Сейчас работает</dt>
+              <dd className="flex min-w-0 flex-wrap items-center gap-x-2 leading-6 sm:col-span-3">
+                {workersOf(data, task.id).map((id, i) => <span key={id} className="min-w-0">{i > 0 && ", "}<PersonOrUnavailable data={data} id={id} className="break-words" /></span>)}
+                <LiveBadge />
+              </dd>
+            </>
+          )}
         </dl>
 
         <AnimatePresence initial={false}>
@@ -985,9 +1100,9 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
             </span>
           )}
           {(actions.length > 0 || task.status === "in_progress" || task.status === "waiting") && (
-            <motion.div layout transition={EASE_OUT} className="flex w-full flex-wrap items-center gap-1 border-t border-border/60 pt-3 sm:w-auto sm:border-t-0 sm:pt-0">
+            <div className="flex w-full flex-wrap items-center gap-1 border-t border-border/60 pt-3 sm:w-auto sm:border-t-0 sm:pt-0">
               {actions.map((x) => (
-                <motion.span key={x.a} layout whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
+                <motion.span key={x.a} whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
                   <Button
                     variant={x.primary ? "default" : "ghost"}
                     size="sm"
@@ -1000,14 +1115,14 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
                 </motion.span>
               ))}
               {(task.status === "in_progress" || task.status === "waiting") && (
-                <motion.span layout whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
+                <motion.span whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
                   <Button size="sm" variant={showReport ? "secondary" : "ghost"} aria-expanded={showReport} onClick={() => setShowReport((v) => !v)}>
                     <CheckCircle2 className="h-4 w-4" />
                     Завершить
                   </Button>
                 </motion.span>
               )}
-            </motion.div>
+            </div>
           )}
         </div>
 
@@ -1029,15 +1144,29 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
       {/* Metadata + progress */}
       <section className="px-6 py-5">
         <div>
-          <div className="mb-1.5 flex justify-between text-xs">
-            <span className="text-muted-foreground">Прогресс{subtasks.length ? " · по подзадачам" : ""}</span>
-            <span className="font-medium tabular-nums">{task.progress}%</span>
-          </div>
-          <div className="relative flex h-3 items-center">
-            <div className="h-[3px] w-full overflow-hidden rounded-full bg-secondary/70">
-              <motion.div className="h-full rounded-full bg-primary/70" initial={false} animate={{ width: `${task.progress}%` }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} />
-            </div>
-            {!subtasks.length && task.status !== "done" && (
+          <LiveSpent task={task} running={data.running}>
+            {(spent) => {
+              const shown = displayedProgress(task, subtasks.length > 0, spent);
+              const label = shown.source === "subtasks" ? " · по подзадачам" : shown.source === "time" ? " · по времени" : "";
+              return (
+                <>
+                  <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span className="flex items-center gap-2 text-muted-foreground">Прогресс{label}{timerLive && <LiveBadge />}</span>
+                    <span className={shown.value === null ? "text-muted-foreground" : "font-medium tabular-nums"}>{shown.value === null ? "Оценка не задана" : `${shown.value}%`}</span>
+                  </div>
+                  <div className="h-[3px] w-full overflow-hidden rounded-full bg-secondary/70">
+                    <motion.div className="h-full rounded-full bg-primary/70" initial={false} animate={{ width: `${shown.value ?? 0}%` }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} />
+                  </div>
+                </>
+              );
+            }}
+          </LiveSpent>
+          {/* Manual progress stays editable for leaf tasks; it is the shown value only without an estimate. */}
+          {!subtasks.length && task.status !== "done" && (
+          <div className="mt-2 flex items-center gap-3">
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">Вручную {task.progress}%</span>
+            <div className="relative flex h-3 flex-1 items-center">
+              <div className="h-px w-full rounded-full bg-secondary/70" />
               <input
                 type="range"
                 min={0}
@@ -1049,8 +1178,9 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
                 className="absolute inset-0 h-3 w-full cursor-pointer appearance-none bg-transparent opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-border [&::-moz-range-thumb]:bg-foreground [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-border [&::-webkit-slider-thumb]:bg-foreground"
                 aria-label="Прогресс выполнения"
               />
-            )}
+            </div>
           </div>
+          )}
         </div>
 
         <AnimatePresence initial={false}>
@@ -1085,7 +1215,6 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
                 <motion.button
                   key={st.id}
                   type="button"
-                  layout
                   {...fadeUp}
                   transition={EASE_OUT}
                   onClick={() => onSelect(st.id)}
@@ -1112,7 +1241,7 @@ function TaskDetail({ task, data, onSelect }: { task: Task; data: WS; onSelect: 
         </AnimatePresence>
       </section>
 
-      <Comments taskId={task.id} data={data} comments={activity.data?.comments ?? []} />
+      <Comments taskId={task.id} data={data} comments={activity.data?.comments ?? NO_COMMENTS} />
 
       {/* History timeline */}
       <section className="bg-background/25 px-6 py-6">
@@ -1212,7 +1341,15 @@ function describe(h: { action: string; field: string | null; old_value: unknown;
 
 type Comment = Awaited<ReturnType<typeof getTaskActivity>>["comments"][number];
 
-function Comments({ taskId, data, comments }: { taskId: string; data: WS; comments: Comment[] }) {
+const NO_COMMENTS: Comment[] = [];
+
+type CommentsProps = { taskId: string; data: WS; comments: Comment[] };
+
+/** Comments depend on the task, its comment list and author profiles only. */
+const Comments = memo(CommentsView, (prev: CommentsProps, next: CommentsProps) =>
+  prev.taskId === next.taskId && prev.comments === next.comments && prev.data.profiles === next.data.profiles);
+
+function CommentsView({ taskId, data, comments }: CommentsProps) {
   const qc = useQueryClient();
   const add = useServerFn(addComment);
   const [body, setBody] = useState("");
@@ -1234,7 +1371,7 @@ function Comments({ taskId, data, comments }: { taskId: string; data: WS; commen
     const vip = data.profiles.find((profile) => profile.id === c.author_id)?.is_vip;
     const replies = comments.filter((r) => r.parent_comment_id === c.id);
     return (
-      <motion.div key={c.id} layout="position" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={EASE_OUT} className={depth > 0 ? "ml-3.5 border-l border-border/70 pl-4" : ""}>
+      <motion.div key={c.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={EASE_OUT} className={depth > 0 ? "ml-3.5 border-l border-border/70 pl-4" : ""}>
         <div className="flex gap-3 py-2.5">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-secondary text-[10px] font-semibold">{initialsOf(author)}</span>
           <div className="min-w-0 flex-1">

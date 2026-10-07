@@ -151,9 +151,10 @@
     oklch(0.135 0.008 255);
 }
 .nexa-flow[data-intensity="calm"] { --flow-intensity: 0.62; }
-/* Automatic dimming while a modal is open or a form field is being edited. */
-body:has([role="dialog"][data-state="open"]) .nexa-flow { --flow-intensity: 0.4; }
-body:has(form:focus-within) .nexa-flow { --flow-intensity: 0.55; }
+/* Automatic dimming while a modal is open or a form field is being edited.
+   The flags are set on the root by AmbientFlowBackground (no :has() on body). */
+.nexa-flow[data-form-focus] { --flow-intensity: 0.55; }
+.nexa-flow[data-dialog-open] { --flow-intensity: 0.4; }
 
 .nexa-flow__layers {
   position: absolute;

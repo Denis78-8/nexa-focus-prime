@@ -8,7 +8,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { STATUS_LABEL, TaskWorkspace, useTaskRealtime } from "@/components/nexa/TaskWorkspace";
+import { STATUS_LABEL, useTaskRealtime } from "@/components/nexa/task-data";
 import { getWorkspace } from "@/lib/tasks.functions";
 import { formatDuration } from "@/lib/nexa-session";
 import { BrandLogo } from "@/components/nexa/BrandLogo";
@@ -17,6 +17,18 @@ import { BrandLogo } from "@/components/nexa/BrandLogo";
 const AdminPanel = lazy(() => import("@/components/nexa/AdminPanel").then((m) => ({ default: m.AdminPanel })));
 const EmployeeDirectory = lazy(() => import("@/components/nexa/EmployeeDirectory").then((m) => ({ default: m.EmployeeDirectory })));
 const KnowledgeBase = lazy(() => import("@/components/nexa/KnowledgeBase").then((m) => ({ default: m.KnowledgeBase })));
+// The Tasks tab (and its motion-heavy UI) is a separate chunk: it loads on the
+// first visit to "Задачи" and is prefetched when the user points at the tab.
+const loadTaskWorkspace = () => import("@/components/nexa/TaskWorkspace");
+const TaskWorkspace = lazy(() => loadTaskWorkspace().then((m) => ({ default: m.TaskWorkspace })));
+let taskWorkspacePrefetched = false;
+function prefetchTaskWorkspace() {
+  if (taskWorkspacePrefetched) return;
+  taskWorkspacePrefetched = true;
+  void loadTaskWorkspace().catch(() => {
+    taskWorkspacePrefetched = false;
+  });
+}
 const SettingsPanel = lazy(() => import("@/components/nexa/SettingsPanel").then((m) => ({ default: m.SettingsPanel })));
 
 function TabLoading() {
@@ -156,7 +168,10 @@ function NexaPrototype() {
   const [newRequestStep, setNewRequestStep] = useState<"closed" | "choose" | "access">("closed");
   const [accessRequestsVersion, setAccessRequestsVersion] = useState(0);
   const [canOpenAdmin, setCanOpenAdmin] = useState(false);
-  const [workspaceAccessSession, setWorkspaceAccessSession] = useState<Session | null>(null);
+  // The full auth check is keyed by user id: a repeated SIGNED_IN or a
+  // TOKEN_REFRESHED for the same user replaces the session object but must not
+  // re-run the check or bring back the "Проверяем сессию…" screen.
+  const [workspaceAccessUserId, setWorkspaceAccessUserId] = useState<string | null>(null);
   const [blockedSession, setBlockedSession] = useState<Session | null>(null);
   const [currentProfile, setCurrentProfile] = useState<EmployeeProfileData | null>(null);
   const [authGateDiagnostics, setAuthGateDiagnostics] = useState<AuthGateDiagnosticsState | null>(null);
@@ -170,7 +185,9 @@ function NexaPrototype() {
   const loadCurrentProfile = useServerFn(getCurrentProfile);
   const loadAuthGateDiagnostics = useServerFn(getAuthGateDiagnostics);
   const { session, loading, connectionError } = useAuth();
+  const sessionUserId = session?.user.id ?? null;
   const navRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const [indicator, setIndicator] = useState({ left: 0, width: 0 });
 
   useEffect(() => {
@@ -215,7 +232,7 @@ function NexaPrototype() {
             setCredentialGate(credentials.expired ? "expired" : "change");
             setCurrentProfile(null);
             setBlockedSession(null);
-            setWorkspaceAccessSession(session);
+            setWorkspaceAccessUserId(session.user.id);
             return;
           }
           setCredentialGate(null);
@@ -243,7 +260,7 @@ function NexaPrototype() {
           }
           if (profile.id !== session.user.id) throw new Error("Профиль не соответствует текущей сессии");
           setCurrentProfile({ ...profile, initials: getInitials(profile.full_name) });
-          setWorkspaceAccessSession(session);
+          setWorkspaceAccessUserId(session.user.id);
           setBlockedSession(null);
           stage = "Auth Gate diagnostic checks";
           updateDiagnostics({ stage });
@@ -323,13 +340,13 @@ function NexaPrototype() {
             }
           }
           setCurrentProfile(null);
-          setWorkspaceAccessSession(session);
+          setWorkspaceAccessUserId(session.user.id);
           setBlockedSession(session);
         }
       })();
     }
     return () => { live = false; };
-  }, [session, loadCurrentProfile, loadAuthGateDiagnostics, loadCredentialState, checkAdmin, authCheckAttempt]);
+  }, [sessionUserId, loadCurrentProfile, loadAuthGateDiagnostics, loadCredentialState, checkAdmin, authCheckAttempt]);
 
   useEffect(() => {
     if (active !== "profile" || !session || blockedSession) return;
@@ -344,7 +361,7 @@ function NexaPrototype() {
         if (live) toast.error(`Не удалось обновить профиль из Cloud: ${safeDiagnosticError(error)}`);
       });
     return () => { live = false; };
-  }, [active, session, blockedSession, loadCurrentProfile]);
+  }, [active, sessionUserId, blockedSession, loadCurrentProfile]);
 
   // After a new profile photo: reload the own profile and the directory, which show it.
   const refreshAfterAvatarChange = async () => {
@@ -375,7 +392,21 @@ function NexaPrototype() {
     return () => observer.disconnect();
   }, [active]);
 
-  if (loading || session && workspaceAccessSession !== session) {
+  // No dependency list: the header mounts only after the auth gate, so the
+  // listener attaches on the first render where it exists (cheap re-binding).
+  useEffect(() => {
+    const header = headerRef.current;
+    if (!header) return;
+    const sync = () => {
+      if (window.scrollY > 0) header.setAttribute("data-scrolled", "");
+      else header.removeAttribute("data-scrolled");
+    };
+    sync();
+    window.addEventListener("scroll", sync, { passive: true });
+    return () => window.removeEventListener("scroll", sync);
+  });
+
+  if (loading || session && workspaceAccessUserId !== session.user.id) {
     return (
       <div className="dark flex min-h-screen items-center justify-center text-sm text-muted-foreground">
         Проверяем сессию…
@@ -454,7 +485,7 @@ function NexaPrototype() {
             className="mt-4"
             onClick={() => {
               setBlockedSession(null);
-              setWorkspaceAccessSession(null);
+              setWorkspaceAccessUserId(null);
               setCurrentProfile(null);
               setAuthCheckAttempt((attempt) => attempt + 1);
             }}
@@ -473,7 +504,10 @@ function NexaPrototype() {
   return (
     <div className="dark min-h-screen text-foreground">
       {/* Top bar */}
-      <header className="sticky top-0 z-10 border-b border-border bg-background/85 backdrop-blur">
+      {/* The backdrop blur is on only while content scrolls under the bar
+          (data-scrolled, set without a re-render); at the top the bar sits
+          on the ambient background and a near-opaque fill looks the same. */}
+      <header ref={headerRef} className="sticky top-0 z-10 border-b border-border bg-background/90 transition-[background-color] duration-200 data-[scrolled]:bg-background/85 data-[scrolled]:backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-6 xl:gap-6">
           <BrandLogo height={34} />
 
@@ -486,6 +520,9 @@ function NexaPrototype() {
                 data-screen={s.id}
                  type="button"
                 onClick={() => setActive(s.id)}
+                onPointerEnter={s.id === "tickets" ? prefetchTaskWorkspace : undefined}
+                onFocus={s.id === "tickets" ? prefetchTaskWorkspace : undefined}
+                onTouchStart={s.id === "tickets" ? prefetchTaskWorkspace : undefined}
                  aria-current={active === s.id ? "page" : undefined}
                 className={`relative z-10 h-9 shrink-0 rounded-md px-3 text-sm transition-colors duration-200 active:scale-[0.97] ${
                   active === s.id ? "bg-secondary/70 text-foreground" : "text-muted-foreground hover:bg-secondary/40 hover:text-foreground"
@@ -903,7 +940,7 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
         <div className="rounded-lg border border-border bg-card p-5 lg:col-span-2">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-sm font-medium">Последние задачи</h2>
-            <button type="button" onClick={() => go("tickets")} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <button type="button" onClick={() => go("tickets")} onPointerEnter={prefetchTaskWorkspace} onFocus={prefetchTaskWorkspace} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
               Открыть задачи →
             </button>
           </div>
@@ -914,7 +951,7 @@ function Overview({ go }: { go: (s: ScreenId) => void }) {
           ) : (
             <div className="divide-y divide-border">
               {recentTasks.map((t) => (
-                <button key={t.id} type="button" onClick={() => go("tickets")} className="flex w-full items-center gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground">
+                <button key={t.id} type="button" onClick={() => go("tickets")} onPointerEnter={prefetchTaskWorkspace} onFocus={prefetchTaskWorkspace} className="flex w-full items-center gap-3 py-2.5 text-left text-sm transition-colors hover:text-foreground">
                   <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">#{t.number}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate" title={t.title}>{t.title}</span>
@@ -964,10 +1001,30 @@ function pluralRu(n: number, one: string, few: string, many: string) {
   return many;
 }
 
+/** Placeholder in the Tasks layout while the TaskWorkspace chunk loads. */
+function TasksSkeleton() {
+  return (
+    <div role="status" aria-label="Загрузка задач" className="animate-pulse motion-reduce:animate-none">
+      <div className="mb-6 space-y-2">
+        <div className="h-7 w-32 rounded-md bg-secondary/60" />
+        <div className="h-4 w-56 rounded bg-secondary/40" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
+        <div className="hidden h-64 rounded-xl border border-border bg-card/40 lg:block" />
+        <div className="space-y-2 rounded-xl border border-border bg-card/40 p-3">
+          {[0, 1, 2, 3].map((i) => <div key={i} className="h-12 rounded-lg bg-secondary/40" />)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Tickets({ initialMineOnly = false }: { initialMineOnly?: boolean }) {
   return (
     <div className="animate-fade-in">
-      <TaskWorkspace initialMineOnly={initialMineOnly} />
+      <Suspense fallback={<TasksSkeleton />}>
+        <TaskWorkspace initialMineOnly={initialMineOnly} />
+      </Suspense>
     </div>
   );
 }

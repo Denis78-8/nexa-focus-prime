@@ -64,6 +64,7 @@ function EmployeeListItem({ employee, selected, isSelf, onSelect }: { employee: 
         <div className="flex items-center gap-1.5">
           <EmployeeName name={employee.full_name || "Сотрудник"} isVip={employee.is_vip} title={employee.full_name || "Сотрудник"} className="min-w-0 truncate text-sm font-medium" />
           {employee.is_vip && <VipBadge size="sm" />}
+          {employee.is_director && <span className="shrink-0 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Директор</span>}
           {isSelf && <span className="shrink-0 text-[10px] text-muted-foreground">вы</span>}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -99,6 +100,7 @@ function EmployeeDetails({ employee, canSeePrivate }: { employee: DirectoryEmplo
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <h2 className="text-2xl font-semibold tracking-tight"><EmployeeName name={employee.full_name || "Сотрудник"} isVip={employee.is_vip} /></h2>
               {employee.is_vip && <VipBadge />}
+              {employee.is_director && <span className="shrink-0 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Директор</span>}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               {[employee.position, employee.department].filter(Boolean).join(" · ") || "Должность и отдел не указаны"}

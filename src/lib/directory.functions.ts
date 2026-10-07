@@ -20,6 +20,8 @@ export type DirectoryEmployee = {
   presence: string;
   created_at: string;
   is_vip: boolean;
+  /** Public "Директор" badge (get_visible_profile_badges), visible to everyone who sees the profile. */
+  is_director: boolean;
   email: string | null;
   phone: string | null;
   location: string | null;
@@ -71,6 +73,15 @@ export const getEmployeeDirectory = createServerFn({ method: "GET" })
       if (!panelError && data && typeof data === "object" && !Array.isArray(data)) panel = data as PanelData;
     }
 
+    // Public director badge only; no other role data for profiles of others.
+    const badgeClient = client as unknown as { rpc: (name: string) => Promise<{ data: unknown; error: unknown }> };
+    const { data: badgeRows } = await badgeClient.rpc("get_visible_profile_badges");
+    const directors = new Set(
+      (Array.isArray(badgeRows) ? badgeRows as { id: string; is_director: boolean }[] : [])
+        .filter((row) => row.is_director)
+        .map((row) => row.id),
+    );
+
     // The caller always may see their own level, role and active flag.
     const { data: ownFlags } = await client.rpc("get_my_nexa_access_flags");
     const own = ownFlags && typeof ownFlags === "object" && !Array.isArray(ownFlags)
@@ -84,11 +95,12 @@ export const getEmployeeDirectory = createServerFn({ method: "GET" })
       const isSelf = profile.id === context.userId;
       return {
         ...profile,
+        is_director: directors.has(profile.id) || (isSelf && own?.role === "director"),
         email: privateRow?.email ?? (isSelf ? ownEmail : null),
         phone: privateRow?.phone ?? null,
         location: privateRow?.location ?? null,
         access_level: privateRow?.access_level ?? (isSelf && typeof own?.access_level === "number" ? own.access_level : null),
-        role: panel ? primaryRole(profile.id, panel) : isSelf && typeof own?.role === "string" ? own.role : null,
+        role: panel ? primaryRole(profile.id, panel) : isSelf && typeof own?.role === "string" ? own.role : directors.has(profile.id) ? "director" : null,
         is_active: privateRow?.is_active ?? (isSelf && typeof own?.is_active === "boolean" ? own.is_active : null),
       };
     });
