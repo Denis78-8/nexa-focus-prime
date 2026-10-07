@@ -823,7 +823,7 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
             <option key={k} value={k}>{v}</option>
           ))}
         </select>
-        <select aria-label="Исполнитель" value={assignee} onChange={(e) => setAssignee(e.target.value)} className="h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs">
+        <select aria-label="Исполнитель" value={assignee} onChange={(e) => setAssignee(e.target.value)} className="h-7 min-w-[10rem] flex-[1_1_10rem] rounded-md border border-input bg-background px-2 text-xs">
           <option value="">Без исполнителя</option>
           {members.map((p) => (
             <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
