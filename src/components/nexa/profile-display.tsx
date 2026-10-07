@@ -11,11 +11,9 @@ export const ROLE_LABEL: Record<string, string> = {
   employee: "Сотрудник",
 };
 
-export const PRESENCE_LABEL: Record<string, string> = {
-  online: "На связи",
-  away: "Отошёл",
-  offline: "Не в сети",
-};
+/** Live status labels (Realtime Presence, src/lib/presence.ts). */
+export const ONLINE_LABEL = "На связи";
+export const OFFLINE_LABEL = "Не в сети";
 
 export function ProfileCard({ title, children }: { title: string; children: ReactNode }) {
   return (

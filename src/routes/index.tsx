@@ -41,7 +41,7 @@ function TabLoading() {
 import { EditableProfileAvatar, ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 import { NOTIFICATIONS_QUERY_KEY, NotificationsCenter, useMyNotifications } from "@/components/nexa/NotificationsCenter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { EmployeeName, PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, realPhone, realValue } from "@/components/nexa/profile-display";
+import { EmployeeName, OFFLINE_LABEL, ONLINE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, realPhone, realValue } from "@/components/nexa/profile-display";
 import { getAdminAccess } from "@/lib/admin.functions";
 import { getAuthGateDiagnostics, getCurrentProfile } from "@/lib/profile.functions";
 import { getMyCredentialState, TEMPORARY_PASSWORD_EXPIRED_MESSAGE } from "@/lib/credentials.functions";
@@ -54,6 +54,7 @@ import {
   type AccessRequestItem,
 } from "@/lib/access-requests.functions";
 import { useAuth } from "@/hooks/useAuth";
+import { startPresence, stopPresence, useIsOnline } from "@/lib/presence";
 import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -391,6 +392,15 @@ function NexaPrototype() {
     observer.observe(nav);
     return () => observer.disconnect();
   }, [active]);
+
+  // Realtime Presence runs once for the signed-in user who passed the auth
+  // gate; it stops on sign-out, a user change or a blocked session.
+  const presenceUserId = session && workspaceAccessUserId === session.user.id && !blockedSession ? session.user.id : null;
+  useEffect(() => {
+    if (!presenceUserId) return;
+    startPresence(presenceUserId);
+    return () => stopPresence();
+  }, [presenceUserId]);
 
   // No dependency list: the header mounts only after the auth gate, so the
   // listener attaches on the first render where it exists (cheap re-binding).
@@ -1044,8 +1054,9 @@ function EmployeeProfile({ employee, onAvatarChanged, onOpenTasks }: { employee:
     : null;
   const director = employee.role === "director" || employee.position?.trim().toLocaleLowerCase("ru-RU") === "директор";
   const position = (director ? employee.position || "Директор" : employee.position) || null;
-  const presence = PRESENCE_LABEL[employee.presence] ?? (employee.presence || null);
-  const online = employee.presence === "online";
+  // Live status from Realtime Presence (not profiles.presence, not is_active).
+  const online = useIsOnline(employee.id);
+  const presence = online ? ONLINE_LABEL : OFFLINE_LABEL;
   // Contacts list only fields that actually have a value the viewer may see.
   const levelLabel = employee.access_level !== null ? `Level ${employee.access_level}` : "—";
   const email = realValue(employee.email);

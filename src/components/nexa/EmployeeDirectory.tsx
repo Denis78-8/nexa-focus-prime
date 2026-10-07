@@ -5,7 +5,8 @@ import { Search, Users } from "lucide-react";
 import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 import { Input } from "@/components/ui/input";
 import { getEmployeeDirectory, type DirectoryEmployee } from "@/lib/directory.functions";
-import { EmployeeName, PRESENCE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, initialsOf, realPhone, realValue } from "@/components/nexa/profile-display";
+import { useIsOnline, useOnlineIds } from "@/lib/presence";
+import { EmployeeName, OFFLINE_LABEL, ONLINE_LABEL, ProfileCard, ProfileField, ROLE_LABEL, VipBadge, initialsOf, realPhone, realValue } from "@/components/nexa/profile-display";
 
 type Filter = "all" | "online" | "offline" | "vip";
 
@@ -24,9 +25,10 @@ function employeesLabel(count: number) {
   return `${count} сотрудников`;
 }
 
-function matchesFilter(employee: DirectoryEmployee, filter: Filter) {
-  if (filter === "online") return employee.presence === "online";
-  if (filter === "offline") return employee.presence !== "online";
+// Online = live Realtime Presence (src/lib/presence.ts), not profiles.presence.
+function matchesFilter(employee: DirectoryEmployee, filter: Filter, onlineIds: ReadonlySet<string>) {
+  if (filter === "online") return onlineIds.has(employee.id);
+  if (filter === "offline") return !onlineIds.has(employee.id);
   if (filter === "vip") return employee.is_vip;
   return true;
 }
@@ -37,8 +39,8 @@ function matchesQuery(employee: DirectoryEmployee, query: string) {
     .some((value) => value?.toLocaleLowerCase("ru-RU").includes(query));
 }
 
-function PresenceDot({ presence }: { presence: string }) {
-  return <span className={`h-2 w-2 shrink-0 rounded-full ${presence === "online" ? "bg-emerald-400" : "bg-muted-foreground/50"}`} />;
+function PresenceDot({ online }: { online: boolean }) {
+  return <span className={`h-2 w-2 shrink-0 rounded-full ${online ? "bg-emerald-400" : "bg-muted-foreground/50"}`} />;
 }
 
 function EmployeeAvatar({ employee, size }: { employee: DirectoryEmployee; size: "sm" | "lg" }) {
@@ -49,6 +51,7 @@ function EmployeeAvatar({ employee, size }: { employee: DirectoryEmployee; size:
 }
 
 function EmployeeListItem({ employee, selected, isSelf, onSelect }: { employee: DirectoryEmployee; selected: boolean; isSelf: boolean; onSelect: () => void }) {
+  const online = useIsOnline(employee.id);
   return (
     <button
       type="button"
@@ -68,7 +71,8 @@ function EmployeeListItem({ employee, selected, isSelf, onSelect }: { employee: 
           {isSelf && <span className="shrink-0 text-[10px] text-muted-foreground">вы</span>}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-          <PresenceDot presence={employee.presence} />
+          <PresenceDot online={online} />
+          <span className="sr-only">{online ? ONLINE_LABEL : OFFLINE_LABEL}</span>
           <span className="truncate">{employee.position || "Должность не указана"}</span>
         </div>
       </div>
@@ -83,7 +87,8 @@ function EmployeeDetails({ employee, canSeePrivate }: { employee: DirectoryEmplo
   const email = realValue(employee.email);
   const phone = realPhone(employee.phone);
   const location = realValue(employee.location);
-  const presence = PRESENCE_LABEL[employee.presence] ?? (employee.presence || null);
+  const online = useIsOnline(employee.id);
+  const presence = online ? ONLINE_LABEL : OFFLINE_LABEL;
   const level = employee.access_level !== null ? `Level ${employee.access_level}` : null;
   const role = employee.role ? ROLE_LABEL[employee.role] ?? employee.role : null;
   const createdAt = employee.created_at
@@ -107,7 +112,7 @@ function EmployeeDetails({ employee, canSeePrivate }: { employee: DirectoryEmplo
             </p>
             {presence && (
               <span className="mt-1.5 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                <PresenceDot presence={employee.presence} />
+                <PresenceDot online={online} />
                 {presence}
               </span>
             )}
@@ -172,9 +177,10 @@ export function EmployeeDirectory() {
   }, [data, selectedId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
+  const onlineIds = useOnlineIds();
   const visible = useMemo(
-    () => (data?.employees ?? []).filter((employee) => matchesFilter(employee, filter) && matchesQuery(employee, normalizedQuery)),
-    [data, filter, normalizedQuery],
+    () => (data?.employees ?? []).filter((employee) => matchesFilter(employee, filter, onlineIds) && matchesQuery(employee, normalizedQuery)),
+    [data, filter, normalizedQuery, onlineIds],
   );
   const selected = data?.employees.find((employee) => employee.id === selectedId) ?? null;
 
