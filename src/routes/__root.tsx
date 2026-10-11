@@ -9,8 +9,12 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { MotionConfig } from "motion/react";
+import { Compass, TriangleAlert } from "lucide-react";
 
 import { Toaster } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
+import { StatusScreen } from "@/components/nexa/StatusScreen";
 import { applyUiPreferences, readUiPreferences } from "@/lib/ui-preferences";
 import appCss from "../styles.css?url";
 import { AmbientFlowBackground } from "@/components/nexa/AmbientFlowBackground";
@@ -19,23 +23,17 @@ import { useClearCacheOnUserChange } from "@/hooks/useClearCacheOnUserChange";
 
 function NotFoundComponent() {
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          The page you're looking for doesn't exist or has been moved.
-        </p>
-        <div className="mt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Go home
-          </Link>
-        </div>
-      </div>
-    </div>
+    <StatusScreen
+      icon={Compass}
+      title="Страница не найдена"
+      actions={
+        <Button asChild className="rounded-full px-5">
+          <Link to="/">На главную</Link>
+        </Button>
+      }
+    >
+      Такой страницы нет или она переехала. Ошибка 404.
+    </StatusScreen>
   );
 }
 
@@ -47,33 +45,30 @@ function ErrorComponent({ error, reset }: { error: unknown; reset: () => void })
   }, [error]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          This page didn't load
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back home.
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <button
+    <StatusScreen
+      icon={TriangleAlert}
+      tone="warning"
+      role="alert"
+      title="Страница не загрузилась"
+      actions={
+        <>
+          <Button
+            className="rounded-full px-5"
             onClick={() => {
               router.invalidate();
               reset();
             }}
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Try again
-          </button>
-          <a
-            href="/"
-            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-          >
-            Go home
-          </a>
-        </div>
-      </div>
-    </div>
+            Повторить
+          </Button>
+          <Button asChild variant="outline" className="rounded-full px-5">
+            <a href="/">На главную</a>
+          </Button>
+        </>
+      }
+    >
+      Что-то пошло не так на нашей стороне. Попробуйте ещё раз или вернитесь на главную.
+    </StatusScreen>
   );
 }
 
@@ -109,7 +104,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="ru">
       <head>
         <HeadContent />
       </head>
@@ -120,6 +115,9 @@ function RootShell({ children }: { children: ReactNode }) {
     </html>
   );
 }
+
+// Sign-in screens draw their own opaque backdrop (AuthBackground).
+const SIGN_IN_ROUTES = new Set(["/auth", "/change-password", "/owner-reset"]);
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
@@ -132,13 +130,17 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* /auth has its own quiet backdrop (AuthBackground); the animated
-          ribbon canvas is not mounted there at all. */}
-      {pathname !== "/auth" && <AmbientFlowBackground />}
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
-      {/* Single app-wide toaster; without it toast() calls were silent. */}
-      <Toaster theme="dark" position="top-right" richColors closeButton />
+      {/* Every Motion animation follows the system "reduce motion" setting;
+          the Settings switch turns them off entirely (MotionGlobalConfig). */}
+      <MotionConfig reducedMotion="user">
+        {/* Sign-in screens have their own backdrop (AuthBackground); the
+            workspace one is not mounted there at all. */}
+        {!SIGN_IN_ROUTES.has(pathname) && <AmbientFlowBackground />}
+        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+        <Outlet />
+        {/* Single app-wide toaster; without it toast() calls were silent. */}
+        <Toaster theme="dark" position="top-right" richColors closeButton />
+      </MotionConfig>
     </QueryClientProvider>
   );
 }

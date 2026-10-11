@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AuthLayout } from "@/components/nexa/AuthLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { completePasswordChange } from "@/lib/edge-functions";
@@ -80,21 +81,21 @@ function ChangePasswordPage() {
 
   return (
     <Shell>
-      <h1 className="text-base font-semibold">Смените временный пароль</h1>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <h1 className="text-title-2">Смените временный пароль</h1>
+      <p className="mt-2 text-callout text-muted-foreground">
         Рабочее пространство откроется после смены пароля.
         {state.expiresAt && <> Временный пароль действителен до {new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(state.expiresAt))}.</>}
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="new-password">Новый пароль</Label>
-          <Input id="new-password" type="password" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+          <Input id="new-password" type="password" autoComplete="new-password" className="h-11" maxLength={PASSWORD_MAX_LENGTH} required value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="confirm-password">Подтверждение пароля</Label>
-          <Input id="confirm-password" type="password" autoComplete="new-password" maxLength={PASSWORD_MAX_LENGTH} required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+          <Input id="confirm-password" type="password" autoComplete="new-password" className="h-11" maxLength={PASSWORD_MAX_LENGTH} required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
         </div>
-        <ul className="space-y-1 text-xs">
+        <ul className="space-y-1.5 text-caption">
           {PASSWORD_RULES.map((rule) => (
             <li key={rule.label} className={rule.test(newPassword) ? "text-primary" : "text-muted-foreground"}>{rule.test(newPassword) ? "✓" : "·"} {rule.label}</li>
           ))}
@@ -102,7 +103,7 @@ function ChangePasswordPage() {
             {confirmPassword && newPassword === confirmPassword ? "✓" : "·"} Пароли совпадают
           </li>
         </ul>
-        <Button type="submit" className="w-full" disabled={busy || !valid}>{busy ? "Сохраняем…" : "Сменить пароль"}</Button>
+        <Button type="submit" size="lg" className="w-full" disabled={busy || !valid}>{busy ? "Сохраняем…" : "Сменить пароль"}</Button>
       </form>
       <SignOutButton />
     </Shell>
@@ -111,9 +112,9 @@ function ChangePasswordPage() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="dark flex min-h-screen items-center justify-center px-6 text-foreground">
-      <div className="w-full max-w-sm rounded-lg border border-border bg-card p-6">{children}</div>
-    </div>
+    <AuthLayout>
+      <div className="luno-rise">{children}</div>
+    </AuthLayout>
   );
 }
 

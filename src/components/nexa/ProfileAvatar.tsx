@@ -82,11 +82,11 @@ export function EditableProfileAvatar({
   return (
     <MotionConfig reducedMotion="user">
     <div className="density-fixed flex shrink-0 flex-col items-center gap-2">
-      <div className="relative h-24 w-24">
+      <div className="relative h-24 w-24 sm:h-28 sm:w-28">
         <motion.div
           whileHover={{ scale: 1.01 }}
           transition={{ duration: 0.2 }}
-          className="h-full w-full overflow-hidden rounded-xl border border-border bg-secondary"
+          className="h-full w-full overflow-hidden rounded-full bg-secondary ring-4 ring-card"
         >
           <AnimatePresence mode="wait" initial={false}>
             <motion.div key={preview?.url ?? "current"} className="h-full w-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
@@ -107,7 +107,7 @@ export function EditableProfileAvatar({
           transition={{ duration: 0.16 }}
           aria-label="Изменить фото профиля"
           title="Изменить фото"
-          className="absolute -bottom-1.5 -right-1.5 flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          className="absolute bottom-0 right-0 flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-secondary text-foreground-secondary ring-4 ring-card transition-colors hover:text-foreground disabled:opacity-50"
         >
           <Camera className="h-3.5 w-3.5" />
         </motion.button>
@@ -118,11 +118,11 @@ export function EditableProfileAvatar({
         <AnimatePresence mode="wait" initial={false}>
           {preview ? (
             <motion.div key="confirm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} className="flex gap-1">
-              <Button type="button" size="sm" className="h-7 px-2.5 text-xs" disabled={saving} onClick={() => void save()}>{saving ? "Сохраняем…" : "Сохранить"}</Button>
-              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={saving} onClick={() => setPreview(null)}>Отмена</Button>
+              <Button type="button" size="sm" className="h-7 rounded-full px-3 text-caption" disabled={saving} onClick={() => void save()}>{saving ? "Сохраняем…" : "Сохранить"}</Button>
+              <Button type="button" size="sm" variant="ghost" className="h-7 rounded-full px-2.5 text-caption" disabled={saving} onClick={() => setPreview(null)}>Отмена</Button>
             </motion.div>
           ) : (
-            <motion.button key="change" type="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} onClick={choose} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <motion.button key="change" type="button" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }} onClick={choose} className="h-7 rounded-full px-2.5 text-caption font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
               Изменить фото
             </motion.button>
           )}

@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
+import { AuthLayout } from "@/components/nexa/AuthLayout";
 
 const OWNER_EMAIL = "denis.savinov@nexa.ru";
 
@@ -54,10 +55,10 @@ function OwnerPasswordSetup() {
   };
 
   return (
-    <main className="dark flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
-      <section className="w-full max-w-md rounded-lg border border-border bg-card p-6">
+    <AuthLayout>
+      <section className="luno-rise">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-primary">TEMPORARY OWNER PASSWORD SETUP</p>
-        <h1 className="text-lg font-semibold">Первичная установка пароля владельца</h1>
+        <h1 className="text-title-2">Первичная установка пароля владельца</h1>
         {success ? (
           <p role="status" className="mt-4 rounded-md border border-primary/30 bg-primary/10 p-3 text-sm">
             Пароль владельца успешно изменён. Войдите в LUNO DIGITAL под {OWNER_EMAIL}.
@@ -88,6 +89,6 @@ function OwnerPasswordSetup() {
           </form>
         )}
       </section>
-    </main>
+    </AuthLayout>
   );
 }

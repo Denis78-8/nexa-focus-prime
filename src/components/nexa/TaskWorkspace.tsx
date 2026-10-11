@@ -1,15 +1,44 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useId, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Pause, Play, CheckCircle2, RotateCcw, Hourglass, MessageSquare, History, CornerDownRight, ListChecks, Plus, Users, ChevronLeft, MoreHorizontal } from "lucide-react";
+import {
+  ArrowUp,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  CornerDownRight,
+  Flag,
+  FolderPlus,
+  Hourglass,
+  ListChecks,
+  MoreHorizontal,
+  Pause,
+  Pencil,
+  Play,
+  Plus,
+  Reply,
+  RotateCcw,
+  Timer,
+  UserPlus,
+  UserRound,
+  Users,
+  X,
+} from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, type Transition } from "motion/react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   addComment,
   addProjectMember,
@@ -25,6 +54,7 @@ import {
 import { formatDuration, getNexaSessionId } from "@/lib/nexa-session";
 import { ProfileAvatar } from "@/components/nexa/ProfileAvatar";
 import { EmployeeName } from "@/components/nexa/profile-display";
+import { ProgressRing, RollingTime, Segmented } from "@/components/nexa/task-visuals";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
@@ -70,23 +100,75 @@ function useNow(active: boolean) {
   return now;
 }
 
-export function TaskWorkspace({ initialMineOnly = false }: { initialMineOnly?: boolean }) {
+/** Placeholder with the shape of the screen while the workspace loads. */
+function WorkspaceSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Загрузка задач">
+      <h1 className="text-title-1">Задачи</h1>
+      <div className="mt-3 h-4 w-48 animate-pulse rounded-full bg-secondary" />
+      <div className="mt-8 grid items-start gap-4 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <div className="hidden space-y-2 lg:block">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-3 px-2 py-2">
+              <div className="h-9 w-9 animate-pulse rounded-full bg-secondary" />
+              <div className="h-3.5 flex-1 animate-pulse rounded-full bg-secondary" />
+            </div>
+          ))}
+        </div>
+        <div className="space-y-3 rounded-card border border-border bg-card p-4">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="h-11 animate-pulse rounded-xl bg-secondary/70"
+              style={{ animationDelay: `${i * 120}ms` }}
+            />
+          ))}
+        </div>
+        <div className="hidden h-72 animate-pulse rounded-card border border-border bg-card xl:block" />
+      </div>
+    </div>
+  );
+}
+
+export function TaskWorkspace({
+  initialMineOnly = false,
+  initialTaskId = null,
+}: {
+  initialMineOnly?: boolean;
+  initialTaskId?: string | null;
+}) {
   const { session, loading } = useAuth();
-  if (loading) return <div className="text-sm text-muted-foreground">Загрузка…</div>;
+  if (loading) return <WorkspaceSkeleton />;
   if (!session)
     return (
-      <div className="rounded-lg border border-border bg-card p-8 text-center">
-        <h1 className="text-xl font-semibold">Задачи</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Войдите, чтобы работать с задачами, таймером и отчётами.</p>
-        <Button asChild className="mt-5 active:scale-[0.97]">
+      <div className="rounded-card border border-border bg-card p-8 text-center">
+        <h1 className="text-title-2">Задачи</h1>
+        <p className="mt-2 text-body text-muted-foreground">
+          Войдите, чтобы работать с задачами, таймером и отчётами.
+        </p>
+        <Button asChild className="mt-5 rounded-full px-5">
           <Link to="/auth">Войти</Link>
         </Button>
       </div>
     );
-  return <Workspace initialMineOnly={initialMineOnly} userId={session.user.id} />;
+  return (
+    <Workspace
+      initialMineOnly={initialMineOnly}
+      initialTaskId={initialTaskId}
+      userId={session.user.id}
+    />
+  );
 }
 
-function Workspace({ initialMineOnly, userId }: { initialMineOnly: boolean; userId: string }) {
+function Workspace({
+  initialMineOnly,
+  initialTaskId,
+  userId,
+}: {
+  initialMineOnly: boolean;
+  initialTaskId: string | null;
+  userId: string;
+}) {
   const qc = useQueryClient();
   const fetchWs = useServerFn(getWorkspace);
   const ensure = useServerFn(ensureProfile);
@@ -112,19 +194,30 @@ function Workspace({ initialMineOnly, userId }: { initialMineOnly: boolean; user
   useTaskRealtime();
 
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [taskId, setTaskId] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(initialTaskId);
   const [mineOnly, setMineOnly] = useState(initialMineOnly);
   // UI-only: whether the "new task" composer is expanded.
   const [composerOpen, setComposerOpen] = useState(false);
   const data = ws.data;
 
   useEffect(() => {
-    if (data && !projectId && data.projects[0]) setProjectId(data.projects[0].id);
-  }, [data, projectId]);
+    if (!data || projectId || !data.projects[0]) return;
+    // A task opened from Overview starts in its own project.
+    const focused = initialTaskId ? data.tasks.find((t) => t.id === initialTaskId) : undefined;
+    setProjectId(focused?.project_id ?? data.projects[0].id);
+  }, [data, projectId, initialTaskId]);
 
   // Cached workspace data of the current user is shown at once.
-  if (!ws.data && (!ready || ws.isLoading)) return <div className="text-sm text-muted-foreground">Загрузка рабочего пространства…</div>;
-  if (ws.error) return <div className="text-sm text-destructive">{(ws.error as Error).message}</div>;
+  if (!ws.data && (!ready || ws.isLoading)) return <WorkspaceSkeleton />;
+  if (ws.error)
+    return (
+      <div
+        role="alert"
+        className="rounded-card border border-destructive/30 bg-destructive/10 px-5 py-4 text-body text-foreground"
+      >
+        {(ws.error as Error).message}
+      </div>
+    );
   if (!data) return null;
 
   const project = data.projects.find((p) => p.id === projectId) ?? null;
@@ -144,10 +237,10 @@ function Workspace({ initialMineOnly, userId }: { initialMineOnly: boolean; user
     <MotionConfig reducedMotion="user">
       <div>
         {/* Page header: title, scope summary and the one global action. */}
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Задачи</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+        <div className="mb-6 flex items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-title-1">Задачи</h1>
+            <p className="mt-2 text-body text-muted-foreground">
               {data.projects.length > 0
                 ? `${data.projects.length} ${plural(data.projects.length, "проект", "проекта", "проектов")} · ${openTotal} ${plural(openTotal, "открытая задача", "открытые задачи", "открытых задач")}`
                 : "Рабочее пространство"}
@@ -157,168 +250,216 @@ function Workspace({ initialMineOnly, userId }: { initialMineOnly: boolean; user
         </div>
 
         {!project ? (
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-5 py-4 text-sm">
-            <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="flex items-start gap-4 rounded-card border border-border bg-card px-5 py-5">
+            <span
+              aria-hidden
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary/70 text-foreground-secondary"
+            >
+              <ListChecks className="h-5 w-5" />
+            </span>
             <div>
-              <div className="font-medium">Проектов пока нет</div>
-              <p className="mt-0.5 text-muted-foreground">Создайте проект (доступно администратору и менеджеру) или попросите руководителя добавить вас в существующий.</p>
+              <div className="text-title-3">Проектов пока нет</div>
+              <p className="mt-1 text-body text-muted-foreground">
+                Создайте проект (доступно администратору и менеджеру) или попросите руководителя
+                добавить вас в существующий.
+              </p>
             </div>
           </div>
         ) : (
-          <div className="grid overflow-clip rounded-xl border border-border bg-card lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,0.92fr)_minmax(0,1.08fr)]">
-            {/* 1. Projects */}
-            <aside aria-label="Проекты" className={`flex-col border-border bg-background/40 lg:flex lg:border-r xl:row-span-1 lg:row-span-2 ${selected ? "hidden" : "flex"}`}>
-              <div className="flex flex-1 flex-col xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:flex-none">
-              <div className="hidden px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-foreground/55 lg:block">Проекты · {data.projects.length}</div>
-              {/* Mobile: compact project selector */}
-              <div className="border-b border-border px-4 py-3 lg:hidden">
-                <label className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-muted-foreground" htmlFor="task-project">Проект</label>
-                <select
-                  id="task-project"
-                  value={projectId ?? ""}
-                  onChange={(e) => selectProject(e.target.value)}
-                  className="h-9 w-full truncate rounded-md border border-border bg-card px-2.5 text-sm"
-                >
+          <div className="grid items-start gap-4 lg:grid-cols-[16.5rem_minmax(0,1fr)] xl:grid-cols-[16.5rem_minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            {/* 1. Projects: a quiet sidebar list on the page itself (no card). */}
+            <aside
+              aria-label="Проекты"
+              className="hidden min-w-0 lg:row-span-2 lg:block lg:self-stretch xl:row-span-1"
+            >
+              <div className="lg:sticky lg:top-[5.5rem] lg:flex lg:max-h-[calc(100dvh-7rem)] lg:flex-col">
+                <div className="hidden items-baseline justify-between px-3 pb-2 lg:flex">
+                  <span className="text-callout font-semibold text-foreground-secondary">
+                    Проекты
+                  </span>
+                  <span className="text-caption tabular-nums text-muted-foreground">
+                    {data.projects.length}
+                  </span>
+                </div>
+                <nav className="-mx-1 hidden min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1 pb-2 lg:block">
                   {data.projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.code} · {p.name}{isCompleted(p) ? " · Завершён" : ""}</option>
+                    <ProjectRow
+                      key={p.id}
+                      project={p}
+                      tasks={data.tasks}
+                      active={p.id === projectId}
+                      onSelect={selectProject}
+                    />
                   ))}
-                </select>
-              </div>
-              <nav className="hidden flex-1 space-y-0.5 overflow-y-auto px-2 pb-3 lg:block">
-                {data.projects.map((p) => {
-                  const active = p.id === projectId;
-                  const done = isCompleted(p);
-                  const own = data.tasks.filter((t) => t.project_id === p.id);
-                  const open = own.filter((t) => t.status !== "done").length;
-                  const count = own.length > 0 ? `${own.length} ${plural(own.length, "задача", "задачи", "задач")}` : "Нет задач";
-                  return (
-                    <div key={p.id} className="group relative">
-                      <button
-                        type="button"
-                        onClick={() => selectProject(p.id)}
-                        aria-current={active ? "true" : undefined}
-                        title={`${p.code} · ${p.name}${done ? ` · ${completedLabel(p)}` : ""}`}
-                        className={`relative flex w-full items-center gap-2.5 rounded-lg py-2 pl-2 pr-9 text-left transition-colors ${active ? "bg-secondary/70" : "hover:bg-secondary/35"}`}
-                      >
-                        {active && <span aria-hidden className={`absolute inset-y-2 left-0 w-0.5 rounded-full ${done ? "bg-foreground/35" : "bg-primary/80"}`} />}
-                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border font-mono text-[11px] font-semibold uppercase tracking-wide ${done ? "border-border bg-secondary/40 text-foreground/55" : active ? "border-primary/30 bg-primary/[0.08] text-primary" : "border-border bg-card text-muted-foreground"}`}>
-                          {p.code.slice(0, 3)}
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className={`line-clamp-2 text-[14px] leading-tight ${done ? `font-medium ${active ? "text-foreground/85" : "text-foreground/70"}` : active ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}>{p.name}</span>
-                          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-muted-foreground">
-                            {done && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-secondary/70 px-1.5 py-px text-[10px] font-medium text-foreground/65"><CheckCircle2 aria-hidden className="h-2.5 w-2.5" />Завершён</span>}
-                            <span className="truncate">{count}</span>
-                          </span>
-                        </span>
-                        {!done && open > 0 && (
-                          <span title={`Открытых задач: ${open}`} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums ${active ? "bg-primary/[0.12] text-primary" : "bg-secondary/70 text-muted-foreground"}`}>{open}</span>
-                        )}
-                      </button>
-                      <ProjectMenu project={p} userId={data.userId} className={`absolute right-1.5 top-1/2 -translate-y-1/2 ${active ? "" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"}`} />
-                    </div>
-                  );
-                })}
-              </nav>
-              <div className="mt-auto hidden lg:block">
-                <Members data={data} projectId={project.id} />
-              </div>
+                </nav>
+                <div className="mt-2 hidden lg:block">
+                  <Members data={data} projectId={project.id} />
+                </div>
               </div>
             </aside>
 
             {/* 2. Tasks of the selected project */}
-            <section aria-label="Задачи проекта" className={`min-w-0 flex-col border-border lg:flex xl:border-r ${selected ? "hidden" : "flex"}`}>
-              <div className="flex flex-1 flex-col xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:flex-none xl:overflow-y-auto">
-              <div className="border-b border-border px-4 pb-3 pt-4">
+            <section
+              aria-label="Задачи проекта"
+              className={`min-w-0 flex-col overflow-clip rounded-card border border-border bg-card lg:flex xl:sticky xl:top-[5.5rem] xl:max-h-[calc(100dvh-7rem)] ${selected ? "hidden" : "flex"}`}
+            >
+              <div className="border-b border-border px-4 pb-3.5 pt-4 sm:px-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">{project.code}</div>
-                    <h2 className="truncate text-base font-semibold tracking-tight" title={project.name}>{project.name}</h2>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-caption text-muted-foreground">
+                      {project.code}
+                    </div>
+                    <h2
+                      className="mt-0.5 hidden break-words text-title-3 lg:line-clamp-2"
+                      title={project.name}
+                    >
+                      {project.name}
+                    </h2>
+                    {/* Phones and tablets: the title itself picks the project (a pull-down). */}
+                    <label htmlFor="task-project" className="sr-only">
+                      Проект
+                    </label>
+                    <NativeSelect
+                      id="task-project"
+                      value={projectId ?? ""}
+                      onChange={(e) => selectProject(e.target.value)}
+                      wrapperClassName="mt-0.5 -ml-2 lg:hidden"
+                      className="h-9 border-transparent bg-transparent pl-2 text-title-3 hover:border-border hover:bg-field"
+                    >
+                      {data.projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {isCompleted(p) ? " · Завершён" : ""}
+                        </option>
+                      ))}
+                    </NativeSelect>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1.5">
                     {projectCompleted ? (
-                      <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 text-[11px] font-medium text-foreground/70">
-                        <CheckCircle2 aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 text-caption font-medium text-foreground-secondary">
+                        <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
                         {completedLabel(project)}
                       </span>
                     ) : (
-                      <Button size="sm" className="h-8 active:scale-[0.97]" aria-expanded={composerOpen} onClick={() => setComposerOpen((open) => !open)}>
-                        <Plus className="h-4 w-4" />
-                        Задача
+                      <Button
+                        size="sm"
+                        className="h-8 w-8 rounded-full px-0 sm:w-auto sm:px-3.5"
+                        aria-label="Новая задача"
+                        aria-expanded={composerOpen}
+                        onClick={() => setComposerOpen((open) => !open)}
+                      >
+                        <Plus
+                          className={`h-4 w-4 transition-[rotate] duration-300 ease-(--ease-spring) ${composerOpen ? "rotate-45" : ""}`}
+                        />
+                        <span className="hidden sm:inline">Задача</span>
                       </Button>
                     )}
-                    <ProjectMenu project={project} userId={data.userId} className="lg:hidden" />
+                    <ProjectMenu project={project} userId={data.userId} />
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <div className="relative flex h-8 items-center rounded-md border border-border bg-background/40 p-0.5">
-                    {([
-                      [false, "Все задачи"],
-                      [true, "Мои задачи"],
-                    ] as const).map(([mine, label]) => (
-                      <button
-                        key={label}
-                        type="button"
-                        aria-pressed={mineOnly === mine}
-                        onClick={() => {
-                          setMineOnly(mine);
-                          setTaskId(null);
-                        }}
-                        className={`relative h-full rounded px-2.5 text-xs transition-colors ${mineOnly === mine ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                      >
-                        {mineOnly === mine && <motion.span layoutId="task-filter-pill" transition={SOFT_SPRING} className="absolute inset-0 rounded bg-secondary" />}
-                        <span className="relative">{label}</span>
-                      </button>
-                    ))}
-                  </div>
+                <div className="mt-3.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <Segmented
+                    label="Какие задачи показать"
+                    pillId="task-filter-pill"
+                    value={mineOnly}
+                    onChange={(mine) => {
+                      setMineOnly(mine);
+                      setTaskId(null);
+                    }}
+                    options={[
+                      [false, "Все"],
+                      [true, "Мои"],
+                    ]}
+                  />
                   <StatusSummary tasks={tasks} />
                 </div>
               </div>
               <AnimatePresence initial={false}>
                 {composerOpen && !projectCompleted && (
-                  <motion.div key="composer" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden border-b border-border">
-                    <div className="p-3">
+                  <motion.div
+                    key="composer"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={EASE_OUT}
+                    className="shrink-0 overflow-hidden border-b border-border"
+                  >
+                    <div className="p-3 sm:p-4">
                       <NewTask projectId={project.id} members={membersOf(data, project.id)} parentId={null} />
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-              {/* presenceAffectsLayout off: otherwise the presence context is
-                  recreated on every render and re-renders each memoized row. */}
-              <AnimatePresence mode="wait" initial={false} presenceAffectsLayout={false}>
-                <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="flex-1 p-2">
-                  <TaskTree tasks={tasks} running={data.running} selectedId={taskId} onSelect={setTaskId} userId={data.userId} mineOnly={mineOnly} data={data} onCreate={composerOpen || projectCompleted ? undefined : () => setComposerOpen(true)} onShowAll={() => setMineOnly(false)} completed={projectCompleted} />
-                </motion.div>
-              </AnimatePresence>
-              <div className="lg:hidden">
-                <Members data={data} projectId={project.id} />
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {/* presenceAffectsLayout off: otherwise the presence context is
+                    recreated on every render and re-renders each memoized row. */}
+                <AnimatePresence mode="wait" initial={false} presenceAffectsLayout={false}>
+                  <motion.div key={filterKey} {...fadeUp} transition={EASE_OUT} className="p-2">
+                    <TaskTree
+                      tasks={tasks}
+                      running={data.running}
+                      selectedId={taskId}
+                      onSelect={setTaskId}
+                      userId={data.userId}
+                      mineOnly={mineOnly}
+                      data={data}
+                      onCreate={
+                        composerOpen || projectCompleted ? undefined : () => setComposerOpen(true)
+                      }
+                      onShowAll={() => setMineOnly(false)}
+                      completed={projectCompleted}
+                    />
+                  </motion.div>
+                </AnimatePresence>
               </div>
+              <div className="border-t border-border p-3 lg:hidden">
+                <Members data={data} projectId={project.id} />
               </div>
             </section>
 
             {/* 3. Selected task */}
-            <section aria-label="Детали задачи" className={`min-w-0 border-t border-border lg:col-start-2 lg:block xl:col-start-auto xl:border-t-0 xl:bg-background/30 xl:shadow-[inset_1px_0_0_oklch(1_0_0/0.05)] ${selected ? "block border-t-0" : "hidden"}`}>
+            <section
+              aria-label="Детали задачи"
+              className={`min-w-0 lg:col-start-2 lg:block xl:col-start-auto ${selected ? "block" : "hidden"}`}
+            >
               <AnimatePresence mode="wait" initial={false}>
                 {selected ? (
                   <motion.div key={selected.id} {...fadeUp} transition={EASE_OUT}>
-                    <div className="flex items-center gap-2 border-b border-border px-4 py-2.5 lg:hidden">
-                      <Button variant="ghost" size="sm" className="h-8 -ml-2 text-muted-foreground" onClick={() => setTaskId(null)}>
+                    <div className="mb-3 flex min-w-0 items-center gap-2 lg:hidden">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="h-9 shrink-0 rounded-full pl-2.5"
+                        onClick={() => setTaskId(null)}
+                      >
                         <ChevronLeft className="h-4 w-4" />
                         Задачи
                       </Button>
-                      <span className="truncate text-xs text-muted-foreground">{project.code} · {project.name}</span>
+                      <span className="min-w-0 truncate text-callout text-muted-foreground">
+                        <span className="font-mono">{project.code}</span> · {project.name}
+                      </span>
                     </div>
                     <TaskDetail task={selected} data={data} onSelect={setTaskId} />
                   </motion.div>
                 ) : (
-                  <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={EASE_OUT} className="px-6 py-8">
-                    <div className="flex items-start gap-3 rounded-lg border border-dashed border-border px-4 py-4">
-                      <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div>
-                        <div className="text-sm font-medium">Задача не выбрана</div>
-                        <p className="mt-0.5 text-sm text-muted-foreground">Выберите задачу в списке, чтобы увидеть таймер, подзадачи, комментарии и историю.</p>
-                      </div>
-                    </div>
+                  <motion.div
+                    key="empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={EASE_OUT}
+                    className="flex flex-col items-center rounded-card border border-dashed border-border-strong px-6 py-14 text-center"
+                  >
+                    <span
+                      aria-hidden
+                      className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card text-foreground-secondary"
+                    >
+                      <ListChecks className="h-5 w-5" />
+                    </span>
+                    <div className="mt-4 text-title-3">Задача не выбрана</div>
+                    <p className="mt-1.5 max-w-xs text-body text-muted-foreground">
+                      Выберите задачу в списке — здесь появятся таймер, подзадачи и обсуждение.
+                    </p>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -337,6 +478,95 @@ const isCompleted = (project: Project | null | undefined) => project?.status ===
 function completedLabel(project: Project) {
   if (!project.completed_at) return "Завершён";
   return `Завершён ${new Date(project.completed_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
+/** First letter of a project name, shown inside its progress ring. */
+function monogram(name: string) {
+  return (
+    name
+      .trim()
+      .match(/[\p{L}\p{N}]/u)?.[0]
+      ?.toLocaleUpperCase("ru-RU") ?? "•"
+  );
+}
+
+/**
+ * One project in the sidebar: a ring with the share of finished tasks around
+ * the project's initial, the name on up to two lines and the task counts.
+ * The selection is a card that glides between rows (layoutId). Project
+ * actions ("⋯") live in the header of the task list.
+ */
+function ProjectRow({
+  project: p,
+  tasks,
+  active,
+  onSelect,
+}: {
+  project: Project;
+  tasks: Task[];
+  active: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const done = isCompleted(p);
+  const own = tasks.filter((t) => t.project_id === p.id);
+  const open = own.filter((t) => t.status !== "done").length;
+  const finished = own.length - open;
+  const count =
+    own.length > 0
+      ? `${own.length} ${plural(own.length, "задача", "задачи", "задач")}`
+      : "Нет задач";
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(p.id)}
+      aria-current={active ? "true" : undefined}
+      title={`${p.code} · ${p.name}${done ? ` · ${completedLabel(p)}` : ""}`}
+      className={`relative flex w-full items-center gap-3 rounded-xl py-2 pl-2 pr-3 text-left transition-colors duration-200 ${active ? "" : "hover:bg-white/[0.04]"}`}
+    >
+      {active && (
+        <motion.span
+          layoutId="project-selection"
+          transition={SOFT_SPRING}
+          className="absolute inset-0 rounded-xl border border-border bg-card shadow-[inset_0_1px_0_oklch(1_0_0/0.05),0_10px_24px_-16px_oklch(0_0_0/0.9)]"
+        />
+      )}
+      <ProgressRing
+        value={done ? 100 : own.length > 0 ? (finished / own.length) * 100 : 0}
+        size={36}
+        stroke={3}
+        tone={active && !done ? "primary" : "muted"}
+        className="relative"
+      >
+        {done ? (
+          <Check aria-hidden className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <span
+            aria-hidden
+            className={`text-callout font-semibold transition-colors duration-300 ${active ? "text-primary" : "text-foreground-secondary"}`}
+          >
+            {monogram(p.name)}
+          </span>
+        )}
+      </ProgressRing>
+      <span className="relative min-w-0 flex-1">
+        <span
+          className={`line-clamp-2 break-words text-body ${done ? "text-muted-foreground" : active ? "font-semibold text-foreground" : "font-medium text-foreground/90"}`}
+        >
+          {p.name}
+        </span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
+          <span className="truncate">{done ? "Завершён" : count}</span>
+          {!done && open > 0 && (
+            <span
+              className={`shrink-0 tabular-nums ${active ? "text-primary" : "text-foreground-secondary"}`}
+            >
+              · {open} {plural(open, "открыта", "открыты", "открыто")}
+            </span>
+          )}
+        </span>
+      </span>
+    </button>
+  );
 }
 
 /**
@@ -378,41 +608,55 @@ function ProjectMenu({ project, userId, className = "" }: { project: Project; us
           <button
             type="button"
             aria-label={`Действия с проектом ${project.code}`}
-            className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${className}`}
+            className={`flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-[color,background-color,opacity] duration-200 hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 ${className}`}
           >
             <MoreHorizontal className="h-4 w-4" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={6} className="w-56 p-1">
-          <div className="truncate px-2 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{project.code} · {project.name}</div>
-          <DropdownMenuItem disabled={!allowed || m.isPending} onSelect={() => setConfirmOpen(true)} className="gap-2.5 rounded-md px-2 py-2 text-[13px]">
+          <div className="truncate px-2 pb-1.5 pt-1 text-caption text-muted-foreground">
+            <span className="font-mono">{project.code}</span> · {project.name}
+          </div>
+          <DropdownMenuItem disabled={!allowed || m.isPending} onSelect={() => setConfirmOpen(true)} className="gap-2.5 rounded-lg px-2 py-2 text-body">
             {completed ? <RotateCcw className="h-4 w-4 text-muted-foreground" /> : <CheckCircle2 className="h-4 w-4 text-muted-foreground" />}
             {completed ? "Открыть проект заново" : "Завершить проект"}
           </DropdownMenuItem>
-          {rights.isFetching && <div className="px-2 pb-1.5 pt-0.5 text-[11px] text-muted-foreground">Проверяем права…</div>}
+          {rights.isFetching && (
+            <div className="px-2 pb-1.5 pt-0.5 text-caption text-muted-foreground">
+              Проверяем права…
+            </div>
+          )}
           {!rights.isFetching && rights.data === false && (
-            <div className="px-2 pb-1.5 pt-0.5 text-[11px] leading-snug text-muted-foreground">Доступно владельцу проекта и руководителям</div>
+            <div className="px-2 pb-1.5 pt-0.5 text-caption text-muted-foreground">
+              Доступно владельцу проекта и руководителям
+            </div>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent className="w-[calc(100%-2rem)] max-w-[26rem] gap-5 rounded-xl p-6">
+        <AlertDialogContent className="w-[calc(100%-2rem)] max-w-[26rem] gap-5 p-6">
           <AlertDialogHeader className="space-y-2.5">
-            <span aria-hidden className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-border bg-secondary/50 text-foreground/70 sm:mx-0">
-              {completed ? <RotateCcw className="h-[18px] w-[18px]" /> : <CheckCircle2 className="h-[18px] w-[18px]" />}
+            <span
+              aria-hidden
+              className="mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-primary/25 bg-primary-soft text-primary sm:mx-0"
+            >
+              {completed ? <RotateCcw className="h-5 w-5" /> : <CheckCircle2 className="h-5 w-5" />}
             </span>
-            <AlertDialogTitle className="text-base font-semibold tracking-tight">{completed ? "Открыть проект заново?" : "Завершить проект?"}</AlertDialogTitle>
-            <AlertDialogDescription className="text-sm leading-relaxed">
+            <AlertDialogTitle>
+              {completed ? "Открыть проект заново?" : "Завершить проект?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-body text-muted-foreground">
               {completed
                 ? "В проекте снова можно будет создавать задачи, запускать таймеры и добавлять участников."
                 : "После завершения новые задачи в проекте создавать нельзя. Все существующие задачи, история и комментарии останутся доступны."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 sm:gap-2">
-            <AlertDialogCancel disabled={m.isPending} className="mt-0 border-border bg-transparent hover:bg-secondary/60">Отмена</AlertDialogCancel>
+            <AlertDialogCancel disabled={m.isPending} className="mt-0">
+              Отмена
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={m.isPending}
-              className="bg-foreground text-background hover:bg-foreground/90"
               onClick={(e) => { e.preventDefault(); m.mutate(completed ? "active" : "completed"); }}
             >
               {m.isPending ? "Сохраняем…" : completed ? "Открыть проект" : "Завершить проект"}
@@ -435,15 +679,32 @@ function plural(n: number, one: string, few: string, many: string) {
 
 /** Status glyph: one restrained shape per status instead of coloured pills. */
 function StatusIcon({ status, className = "" }: { status: string; className?: string }) {
-  if (status === "done") return <CheckCircle2 aria-hidden className={`h-4 w-4 text-muted-foreground ${className}`} />;
-  if (status === "waiting") return <Hourglass aria-hidden className={`h-3.5 w-3.5 text-amber-300/80 ${className}`} />;
-  if (status === "in_progress")
+  if (status === "done")
     return (
-      <span aria-hidden className={`flex h-4 w-4 items-center justify-center rounded-full border border-primary/60 ${className}`}>
-        <span className="h-2 w-2 rounded-full bg-primary" />
+      <span
+        aria-hidden
+        className={`flex h-4 w-4 items-center justify-center rounded-full bg-muted-foreground/35 ${className}`}
+      >
+        <Check className="h-2.5 w-2.5 text-background" strokeWidth={3.5} />
       </span>
     );
-  return <span aria-hidden className={`h-4 w-4 rounded-full border border-muted-foreground/50 ${className}`} />;
+  if (status === "waiting")
+    return <Hourglass aria-hidden className={`h-4 w-4 text-warning ${className}`} />;
+  if (status === "in_progress")
+    return (
+      <span
+        aria-hidden
+        className={`flex h-4 w-4 items-center justify-center rounded-full border-[1.5px] border-primary shadow-[0_0_8px_oklch(0.724_0.187_48.9/0.45)] ${className}`}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+      </span>
+    );
+  return (
+    <span
+      aria-hidden
+      className={`h-4 w-4 rounded-full border-[1.5px] border-muted-foreground/60 ${className}`}
+    />
+  );
 }
 
 /** Counts per status for the selected project, shown as quiet inline text. */
@@ -452,11 +713,12 @@ function StatusSummary({ tasks }: { tasks: Task[] }) {
   const count = (status: string) => tasks.filter((t) => t.status === status).length;
   const parts = (["in_progress", "todo", "waiting", "done"] as const).map((s) => [s, count(s)] as const).filter(([, n]) => n > 0);
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
       {parts.map(([s, n]) => (
-        <span key={s} className="inline-flex items-center gap-1.5">
+        <span key={s} className="inline-flex items-center gap-1.5" title={STATUS_LABEL[s]}>
           <StatusIcon status={s} className="scale-[0.8]" />
-          {STATUS_LABEL[s]} <span className="tabular-nums text-foreground/80">{n}</span>
+          <span className="hidden sm:inline">{STATUS_LABEL[s]}</span>
+          <span className="tabular-nums text-foreground-secondary">{n}</span>
         </span>
       ))}
     </div>
@@ -551,9 +813,9 @@ function LiveSpent({ task, running, children }: { task: Task; running: WS["runni
 
 function LiveBadge() {
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-primary">
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-soft px-1.5 py-px text-badge uppercase tracking-wider text-primary">
       <span className="relative flex h-1.5 w-1.5">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-40 motion-reduce:hidden" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50 motion-reduce:hidden" />
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
       </span>
       Live
@@ -582,32 +844,41 @@ const TaskRow = memo(function TaskRow({ task: t, depth, selected, onSelect, assi
   );
   const due = dueLabel(t);
   const urgent = t.priority === "high" || t.priority === "critical";
+  const finished = t.status === "done";
   return (
     <motion.button
       type="button"
       onClick={() => onSelect(t.id)}
-      whileTap={{ scale: 0.995 }}
+      whileTap={{ scale: 0.99 }}
       aria-current={selected ? "true" : undefined}
       title={t.title}
-      className={`relative flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-200 ${selected ? "" : "hover:bg-secondary/35"}`}
+      className={`group/row relative flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-200 ${selected ? "" : "hover:bg-white/[0.04]"}`}
     >
       {selected && (
-        <motion.span layoutId="task-selection" transition={SOFT_SPRING} className="absolute inset-0 rounded-lg bg-secondary/70 shadow-[inset_0_0_0_1px_oklch(1_0_0/0.06)]">
-          <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary/80" />
+        <motion.span
+          layoutId="task-selection"
+          transition={SOFT_SPRING}
+          className="absolute inset-0 rounded-xl bg-secondary shadow-[inset_0_0_0_1px_oklch(1_0_0/0.07),inset_0_1px_0_oklch(1_0_0/0.06)]"
+        >
+          <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-primary shadow-[0_0_10px_oklch(0.724_0.187_48.9/0.6)]" />
         </motion.span>
       )}
-      <span className="relative mt-0.5 flex h-5 w-4 shrink-0 items-center justify-center"><StatusIcon status={t.status} /></span>
+      <span className="relative flex h-5 w-4 shrink-0 items-center justify-center">
+        <StatusIcon status={t.status} />
+      </span>
       <span className="relative min-w-0 flex-1">
-        <span className="flex items-baseline gap-2">
-          <span className="shrink-0 font-mono text-[11px] text-muted-foreground/65">#{t.number}</span>
-          <span className={`truncate leading-5 ${depth > 0 ? "text-[13px]" : "text-[14px]"} ${t.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : selected ? "font-medium text-foreground" : depth > 0 ? "text-foreground/85" : "font-medium text-foreground/95"}`}>{t.title}</span>
+        <span
+          className={`block truncate ${depth > 0 ? "text-callout leading-5" : "text-body"} ${finished ? "text-muted-foreground line-through decoration-muted-foreground/40" : selected ? "font-semibold text-foreground" : depth > 0 ? "text-foreground/85" : "font-medium text-foreground/95"}`}
+        >
+          {t.title}
         </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-x-2.5 text-[11px] leading-4 text-muted-foreground/75">
+        <span className="mt-1 flex min-w-0 items-center gap-x-2.5 text-caption text-muted-foreground">
+          <span className="shrink-0 font-mono text-muted-foreground/80">#{t.number}</span>
           <span className="inline-flex min-w-0 items-center gap-1.5">
             {assignee ? (
               <ProfileAvatar avatarUrl={assignee.avatar_url} name={assignee.full_name || "Сотрудник"} initials={initialsOf(assignee.full_name || "С")} className="h-4 w-4 rounded-full" fallbackClassName="text-[8px]" />
             ) : (
-              <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border" />
+              <span className="h-4 w-4 shrink-0 rounded-full border border-dashed border-border-strong" />
             )}
             {assignee ? <EmployeeName name={shortName(assignee.full_name || "Сотрудник")} isVip={assignee.is_vip} title={assignee.full_name ?? undefined} className="truncate" /> : <span className="truncate">{t.assignee_id ? "Профиль недоступен" : "Без исполнителя"}</span>}
           </span>
@@ -625,15 +896,35 @@ const TaskRow = memo(function TaskRow({ task: t, depth, selected, onSelect, assi
               })}
             </span>
           )}
-          {urgent && <span className={`shrink-0 ${t.priority === "critical" ? "text-destructive/85" : "text-amber-300/70"}`}>{PRIORITY_LABEL[t.priority]}</span>}
-          {due && <span className={`shrink-0 ${due.overdue ? "text-destructive/85" : "hidden sm:inline"}`}>до {due.text}</span>}
+          {urgent && !finished && (
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 ${t.priority === "critical" ? "text-destructive" : "text-warning"}`}
+            >
+              <Flag aria-hidden className="h-3 w-3" />
+              <span className="hidden sm:inline">{PRIORITY_LABEL[t.priority]}</span>
+            </span>
+          )}
+          {due && (
+            <span
+              className={`shrink-0 items-center gap-1 ${due.overdue ? "inline-flex text-destructive" : "hidden sm:inline-flex"}`}
+            >
+              <CalendarDays aria-hidden className="h-3 w-3" />
+              {due.text}
+            </span>
+          )}
           {childTotal > 0 && (
             <span className="hidden shrink-0 items-center gap-1 sm:inline-flex" title="Подзадачи: готово / всего"><CornerDownRight className="h-3 w-3" />{childDone}/{childTotal}</span>
           )}
         </span>
       </span>
-      <span className="relative hidden shrink-0 pt-0.5 text-right sm:block">
-        <span className={`block font-mono text-[11px] tabular-nums ${live ? "text-foreground/90" : "text-muted-foreground/65"}`}><LiveSpent task={t} running={running}>{(spent) => formatDuration(spent)}</LiveSpent></span>
+      <span className="relative hidden shrink-0 pt-px text-right sm:block">
+        <span
+          className={`block text-caption tabular-nums ${live ? "font-medium text-primary" : "text-muted-foreground"}`}
+        >
+          <LiveSpent task={t} running={running}>
+            {(spent) => formatDuration(spent)}
+          </LiveSpent>
+        </span>
       </span>
       <span className="sr-only">{STATUS_LABEL[t.status]}</span>
     </motion.button>
@@ -643,7 +934,7 @@ const TaskRow = memo(function TaskRow({ task: t, depth, selected, onSelect, assi
 function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data, onCreate, onShowAll, completed = false }: { tasks: Task[]; running: WS["running"]; selectedId: string | null; onSelect: (id: string) => void; userId: string; mineOnly: boolean; data: WS; onCreate?: (() => void) | undefined; onShowAll: () => void; completed?: boolean }) {
   // Derived tree data is recomputed only when the task list or the filter
   // changes, not on every render (selection, timer, profile updates).
-  const { roots, childrenOf } = useMemo(() => {
+  const { roots, childrenOf, rootIdOf } = useMemo(() => {
     const visibleIds = new Set(tasks.filter((t) => !mineOnly || t.assignee_id === userId).map((t) => t.id));
     const byId = new Map(tasks.map((t) => [t.id, t]));
     if (mineOnly) {
@@ -666,8 +957,28 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
         else children.set(t.parent_task_id, [t]);
       } else rootList.push(t);
     }
-    return { roots: rootList, childrenOf: (id: string) => children.get(id) ?? NO_TASKS };
+    const rootIdOf = (id: string) => {
+      let task = byId.get(id);
+      while (task?.parent_task_id && byId.has(task.parent_task_id))
+        task = byId.get(task.parent_task_id);
+      return task?.id ?? null;
+    };
+    return { roots: rootList, childrenOf: (id: string) => children.get(id) ?? NO_TASKS, rootIdOf };
   }, [tasks, mineOnly, userId]);
+  // Finished top-level tasks fold into "Завершённые" (like Reminders), open
+  // work stays on top. The group opens by itself when nothing else is open or
+  // when the selected task lives in it.
+  const openRoots = roots.filter((t) => t.status !== "done");
+  const doneRoots = roots.filter((t) => t.status === "done");
+  const selectedRoot = selectedId ? rootIdOf(selectedId) : null;
+  const selectedInDone = doneRoots.some((t) => t.id === selectedRoot);
+  const [showDone, setShowDone] = useState(selectedInDone);
+  const [wasSelectedInDone, setWasSelectedInDone] = useState(selectedInDone);
+  if (selectedInDone !== wasSelectedInDone) {
+    setWasSelectedInDone(selectedInDone);
+    if (selectedInDone) setShowDone(true);
+  }
+  const doneOpen = showDone || openRoots.length === 0;
   // Per-task running state as stable primitives, so a memoized row re-renders
   // only when its own timers change.
   const runningByTask = useMemo(() => {
@@ -710,29 +1021,95 @@ function TaskTree({ tasks, running, selectedId, onSelect, userId, mineOnly, data
     const empty = tasks.length === 0;
     if (empty && completed)
       return (
-        <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/25 px-4 py-3.5">
-          <CheckCircle2 aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="text-sm font-medium">В проекте нет задач</div>
-            <p className="mt-0.5 text-xs text-muted-foreground">Проект завершён — новые задачи не создаются</p>
-          </div>
+        <div className="flex flex-col items-center px-4 py-10 text-center">
+          <CheckCircle2 aria-hidden className="h-6 w-6 text-muted-foreground" />
+          <div className="mt-3 text-body font-medium">В проекте нет задач</div>
+          <p className="mt-1 text-callout text-muted-foreground">
+            Проект завершён — новые задачи не создаются
+          </p>
         </div>
       );
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3.5">
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{empty ? "В проекте пока нет задач" : "Нет задач, назначенных на вас"}</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{empty ? (completed ? "Проект завершён — новые задачи не создаются" : "Начните с первой задачи — подзадачи можно добавить позже.") : "Остальные задачи проекта — во вкладке «Все задачи»."}</p>
+      <div className="flex flex-col items-center px-4 py-10 text-center">
+        <span
+          aria-hidden
+          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-secondary/70 text-foreground-secondary"
+        >
+          {empty ? <ListChecks className="h-5 w-5" /> : <UserRound className="h-5 w-5" />}
+        </span>
+        <div className="mt-3 text-body font-medium">
+          {empty ? "В проекте пока нет задач" : "Нет задач, назначенных на вас"}
         </div>
+        <p className="mt-1 max-w-xs text-callout text-muted-foreground">
+          {empty
+            ? "Начните с первой задачи — подзадачи можно добавить позже."
+            : "Остальные задачи проекта — в списке «Все»."}
+        </p>
         {empty ? (
-          onCreate && <Button size="sm" variant="secondary" className="h-8 shrink-0" onClick={onCreate}><Plus className="h-4 w-4" />Создать</Button>
+          onCreate && (
+            <Button size="sm" className="mt-4 h-9 rounded-full px-4" onClick={onCreate}>
+              <Plus className="h-4 w-4" />
+              Создать задачу
+            </Button>
+          )
         ) : (
-          <Button size="sm" variant="ghost" className="h-8 shrink-0 text-muted-foreground" onClick={onShowAll}>Все задачи</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="mt-4 h-9 rounded-full px-4"
+            onClick={onShowAll}
+          >
+            Показать все
+          </Button>
         )}
       </div>
     );
   }
-  return <div className="space-y-0.5">{roots.map((t) => render(t, 0))}</div>;
+  return (
+    <div>
+      {openRoots.length > 0 ? (
+        <div className="space-y-0.5">{openRoots.map((t) => render(t, 0))}</div>
+      ) : (
+        <p className="flex items-center gap-2 px-3 py-2.5 text-callout text-muted-foreground">
+          <CheckCircle2 aria-hidden className="h-4 w-4 text-success" />
+          Открытых задач нет — всё завершено
+        </p>
+      )}
+      {doneRoots.length > 0 && (
+        <div className={openRoots.length > 0 ? "mt-2 border-t border-border pt-2" : ""}>
+          {openRoots.length > 0 ? (
+            <button
+              type="button"
+              aria-expanded={doneOpen}
+              onClick={() => setShowDone((open) => !open)}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-callout font-medium text-muted-foreground transition-colors duration-200 hover:bg-white/[0.04] hover:text-foreground"
+            >
+              <ChevronRight
+                aria-hidden
+                className={`h-4 w-4 transition-[rotate] duration-300 ease-(--ease-spring) ${doneOpen ? "rotate-90" : ""}`}
+              />
+              Завершённые
+              <span className="tabular-nums text-muted-foreground">{doneRoots.length}</span>
+            </button>
+          ) : null}
+          <AnimatePresence initial={false}>
+            {doneOpen && (
+              <motion.div
+                key="done"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={EASE_OUT}
+                className="overflow-hidden"
+              >
+                <div className="space-y-0.5">{doneRoots.map((t) => render(t, 0))}</div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function NewProject({ onCreated }: { onCreated: (id: string) => void }) {
@@ -752,25 +1129,58 @@ function NewProject({ onCreated }: { onCreated: (id: string) => void }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  if (!open)
-    return (
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} className="h-9 text-muted-foreground active:scale-[0.97]">
-        Новый проект
-      </Button>
-    );
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        m.mutate();
-      }}
-      className="flex items-center gap-2"
-    >
-      <Input placeholder="Код" value={code} onChange={(e) => setCode(e.target.value)} className="h-8 w-20" required />
-      <Input placeholder="Название проекта" value={name} onChange={(e) => setName(e.target.value)} className="h-8 w-48" required />
-      <Button size="sm" disabled={m.isPending}>Создать</Button>
-      <Button size="sm" variant="ghost" type="button" onClick={() => setOpen(false)}>Отмена</Button>
-    </form>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-label="Новый проект"
+          className="h-9 w-9 shrink-0 rounded-full px-0 sm:w-auto sm:px-4"
+        >
+          <FolderPlus className="h-4 w-4" />
+          <span className="hidden sm:inline">Новый проект</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={8} className="w-[min(22rem,calc(100vw-2rem))] p-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            m.mutate();
+          }}
+        >
+          <div className="text-title-3">Новый проект</div>
+          <p className="mt-1 text-callout text-muted-foreground">
+            Короткий код проекта виден в задачах и меню.
+          </p>
+          <div className="mt-4 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-2">
+            <Input
+              aria-label="Код проекта"
+              placeholder="Код"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              className="font-mono"
+              required
+            />
+            <Input
+              aria-label="Название проекта"
+              placeholder="Название"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button size="sm" variant="ghost" type="button" onClick={() => setOpen(false)}>
+              Отмена
+            </Button>
+            <Button size="sm" disabled={m.isPending}>
+              {m.isPending ? "Создаём…" : "Создать"}
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -809,26 +1219,74 @@ function NewTask({ projectId, members, parentId }: { projectId: string; members:
         e.preventDefault();
         m.mutate();
       }}
-      className="rounded-lg border border-border bg-background/40 p-2.5"
+      className="rounded-xl border border-border bg-background/50 p-3"
     >
       <div className="flex items-center gap-2">
-        <Input placeholder={parentId ? "Новая подзадача" : "Новая задача"} value={title} onChange={(e) => setTitle(e.target.value)} className="h-8 min-w-0 flex-1" required minLength={2} />
-        <Button size="sm" disabled={m.isPending} className="h-8 active:scale-[0.97]">Добавить</Button>
+        <Input
+          placeholder={parentId ? "Новая подзадача" : "Новая задача"}
+          aria-label={parentId ? "Название подзадачи" : "Название задачи"}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="h-10 min-w-0 flex-1 text-[15px] md:text-[15px]"
+          required
+          minLength={2}
+        />
+        <Button disabled={m.isPending} className="h-10 shrink-0 rounded-full px-4">
+          Добавить
+        </Button>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
-        <Input type="number" min="0" step="0.25" placeholder="Оценка, ч" value={hours} onChange={(e) => setHours(e.target.value)} className="h-7 w-24 text-xs" inputMode="decimal" />
-        <Input aria-label="Срок выполнения" type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className="h-7 w-44 text-xs" />
-        <select aria-label="Приоритет" value={priority} onChange={(e) => setPriority(e.target.value as typeof priority)} className="h-7 rounded-md border border-input bg-background px-2 text-xs">
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <label className="relative block min-w-0">
+          <Clock
+            aria-hidden
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="number"
+            min="0"
+            step="0.25"
+            aria-label="Оценка в часах"
+            placeholder="Оценка, ч"
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+            className="pl-9"
+            inputMode="decimal"
+          />
+        </label>
+        <NativeSelect
+          aria-label="Приоритет"
+          icon={Flag}
+          value={priority}
+          onChange={(e) => setPriority(e.target.value as typeof priority)}
+        >
           {Object.entries(PRIORITY_LABEL).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
-        </select>
-        <select aria-label="Исполнитель" value={assignee} onChange={(e) => setAssignee(e.target.value)} className="h-7 min-w-[10rem] flex-[1_1_10rem] rounded-md border border-input bg-background px-2 text-xs">
+        </NativeSelect>
+        <label className="relative block min-w-0">
+          <CalendarDays
+            aria-hidden
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            aria-label="Срок выполнения"
+            type="datetime-local"
+            value={dueAt}
+            onChange={(e) => setDueAt(e.target.value)}
+            className={`pl-9 ${dueAt ? "" : "text-muted-foreground"}`}
+          />
+        </label>
+        <NativeSelect
+          aria-label="Исполнитель"
+          icon={UserRound}
+          value={assignee}
+          onChange={(e) => setAssignee(e.target.value)}
+        >
           <option value="">Без исполнителя</option>
           {members.map((p) => (
             <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
     </form>
   );
@@ -852,36 +1310,107 @@ function Members({ data, projectId }: { data: WS; projectId: string }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const shown = members.slice(0, 6);
   return (
-    <div className="border-t border-border/60 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          <Users className="h-3.5 w-3.5" />
-          Участники · {members.length}
+    <div className="lg:rounded-card lg:border lg:border-border lg:bg-card/60 lg:p-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 text-callout font-semibold text-foreground-secondary">
+          <Users aria-hidden className="h-4 w-4" />
+          Участники
+          <span className="font-normal tabular-nums text-muted-foreground">{members.length}</span>
         </span>
         {others.length > 0 && !adding && (
-          <button type="button" onClick={() => setAdding(true)} className="text-[11px] text-muted-foreground transition-colors hover:text-foreground">
-            + Добавить
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-caption font-medium text-muted-foreground transition-colors duration-200 hover:bg-secondary hover:text-foreground"
+          >
+            <UserPlus aria-hidden className="h-3.5 w-3.5" />
+            Добавить
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-1">
-        {members.map((p) => (
-          <EmployeeName key={p.id} name={p.full_name || "Сотрудник"} isVip={p.is_vip} title={p.full_name || "Сотрудник"} className="max-w-[12rem] truncate rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground" />
-        ))}
-      </div>
-      {others.length > 0 && adding && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <select aria-label="Добавить участника" value={uid} onChange={(e) => setUid(e.target.value)} className="h-7 min-w-0 flex-1 basis-40 rounded-md border border-input bg-background px-2 text-xs">
-            <option value="">Добавить сотрудника…</option>
-            {others.map((p) => (
-              <option key={p.id} value={p.id}>{p.full_name || "Сотрудник"}</option>
+      {members.length > 0 && (
+        <div className="mt-2.5 flex items-center gap-2.5">
+          <div className="flex shrink-0 -space-x-2">
+            {shown.map((p) => (
+              <ProfileAvatar
+                key={p.id}
+                avatarUrl={p.avatar_url}
+                name={p.full_name || "Сотрудник"}
+                initials={initialsOf(p.full_name || "С")}
+                className="h-7 w-7 rounded-full ring-2 ring-card"
+                fallbackClassName="text-[10px]"
+              />
             ))}
-          </select>
-          <Button size="sm" variant="secondary" className="h-7 text-xs" disabled={!uid || m.isPending} onClick={() => m.mutate()}>Добавить</Button>
-          <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => { setAdding(false); setUid(""); }}>Отмена</Button>
+            {members.length > shown.length && (
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-[10px] font-semibold text-foreground-secondary ring-2 ring-card">
+                +{members.length - shown.length}
+              </span>
+            )}
+          </div>
+          <p className="line-clamp-2 min-w-0 text-caption text-muted-foreground">
+            {members.map((p, i) => (
+              <span key={p.id}>
+                {i > 0 && ", "}
+                <EmployeeName
+                  name={shortName(p.full_name || "Сотрудник")}
+                  isVip={p.is_vip}
+                  title={p.full_name || "Сотрудник"}
+                />
+              </span>
+            ))}
+          </p>
         </div>
       )}
+      <AnimatePresence initial={false}>
+        {others.length > 0 && adding && (
+          <motion.div
+            key="add-member"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={EASE_OUT}
+            className="overflow-hidden"
+          >
+            <div className="mt-3 space-y-2">
+              <NativeSelect
+                aria-label="Добавить участника"
+                value={uid}
+                onChange={(e) => setUid(e.target.value)}
+              >
+                <option value="">Выберите сотрудника…</option>
+                {others.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name || "Сотрудник"}
+                  </option>
+                ))}
+              </NativeSelect>
+              <div className="flex justify-end gap-1.5">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8"
+                  onClick={() => {
+                    setAdding(false);
+                    setUid("");
+                  }}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 rounded-full px-3.5"
+                  disabled={!uid || m.isPending}
+                  onClick={() => m.mutate()}
+                >
+                  Добавить
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -941,6 +1470,18 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
   const [assigneeDraft, setAssigneeDraft] = useState(task.assignee_id ?? "");
   const [estimateDraft, setEstimateDraft] = useState(task.estimated_seconds ? String(task.estimated_seconds / 3600) : "");
   const [dueDraft, setDueDraft] = useState(toLocalDateTime(task.due_at));
+  // UI-only: which half of the discussion is shown, folded lists, and the
+  // manual-progress value while the slider is being dragged.
+  const [discussion, setDiscussion] = useState<"comments" | "history">("comments");
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [showIntervals, setShowIntervals] = useState(false);
+  const [manualDraft, setManualDraft] = useState<number | null>(null);
+  const [seenProgress, setSeenProgress] = useState(task.progress);
+  if (seenProgress !== task.progress) {
+    setSeenProgress(task.progress);
+    setManualDraft(null);
+  }
+  const formId = useId();
 
   const act = useMutation({
     mutationFn: (v: { action: Action; report?: string }) =>
@@ -973,85 +1514,229 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
   const history = activity.data?.history ?? [];
   const entries = activity.data?.entries ?? [];
 
-  return (
-    <div className="divide-y divide-border">
-      {/* Header */}
-      <section className="px-6 pb-6 pt-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 font-mono text-xs text-muted-foreground">
-              <span>#{task.number}</span>
-              {parent && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>подзадача</span>
-                  <button type="button" className="truncate text-foreground/80 underline-offset-2 hover:text-primary hover:underline" onClick={() => onSelect(parent.id)}>#{parent.number} {parent.title}</button>
-                </>
-              )}
-            </div>
-            <h2 className="mt-1.5 break-words text-[22px] font-semibold leading-tight tracking-tight">{task.title}</h2>
-            {task.description && <p className="mt-2 whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground sm:text-sm">{task.description}</p>}
-          </div>
-          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={() => {
-            setTitleDraft(task.title);
-            setDescriptionDraft(task.description ?? "");
-            setPriorityDraft(task.priority);
-            setAssigneeDraft(task.assignee_id ?? "");
-            setEstimateDraft(task.estimated_seconds ? String(task.estimated_seconds / 3600) : "");
-            setDueDraft(toLocalDateTime(task.due_at));
-            setEditing((value) => !value);
-          }}>{editing ? "Закрыть" : "Изменить"}</Button>
-        </div>
+  const comments = activity.data?.comments ?? NO_COMMENTS;
+  const visibleHistory = showAllHistory ? history : history.slice(0, HISTORY_PREVIEW);
+  const manualValue = manualDraft ?? task.progress;
+  const due = dueLabel(task);
+  const openEditor = () => {
+    setTitleDraft(task.title);
+    setDescriptionDraft(task.description ?? "");
+    setPriorityDraft(task.priority);
+    setAssigneeDraft(task.assignee_id ?? "");
+    setEstimateDraft(task.estimated_seconds ? String(task.estimated_seconds / 3600) : "");
+    setDueDraft(toLocalDateTime(task.due_at));
+    setEditing((value) => !value);
+  };
 
-        {/* Properties: one quiet label/value grid instead of chips and cards. */}
-        <dl className="mt-5 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 sm:gap-y-1.5 text-sm sm:grid-cols-[6rem_minmax(0,1fr)_6rem_minmax(0,1fr)]">
-          <dt className="text-xs leading-6 text-muted-foreground">Статус</dt>
-          <dd className="flex min-w-0 items-center gap-2 leading-6"><StatusIcon status={task.status} className="scale-90" />{STATUS_LABEL[task.status]}</dd>
-          <dt className="text-xs leading-6 text-muted-foreground">Приоритет</dt>
-          <dd className={`leading-6 ${task.priority === "critical" ? "text-destructive" : task.priority === "high" ? "text-amber-300/90" : "text-foreground/85"}`}>{PRIORITY_LABEL[task.priority] ?? task.priority}</dd>
-          <dt className="text-xs leading-6 text-muted-foreground">Срок</dt>
-          <dd className={`leading-6 ${dueLabel(task)?.overdue ? "text-destructive" : task.due_at ? "" : "text-muted-foreground"}`}>{task.due_at ? new Date(task.due_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "Не задан"}</dd>
-          <dt className="text-xs leading-6 text-muted-foreground">Оценка</dt>
-          <dd className={`leading-6 ${est ? "font-mono tabular-nums" : "text-muted-foreground"}`}>{est ? formatDuration(est) : "Не задана"}</dd>
-          <dt className="text-xs leading-6 text-muted-foreground">Исполнитель</dt>
-          <dd className="flex min-w-0 items-center gap-2 leading-6 sm:col-span-3">
-            {assigneeProfile ? (
-              <ProfileAvatar avatarUrl={assigneeProfile.avatar_url} name={assigneeProfile.full_name || "Сотрудник"} initials={initialsOf(assigneeProfile.full_name || "С")} className="h-5 w-5 rounded-full" fallbackClassName="text-[9px]" />
-            ) : (
-              <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" />
+  return (
+    <article className="@container space-y-4">
+      {/* Header: title, description and properties */}
+      <section className="rounded-card border border-border bg-card p-5 sm:p-6">
+        {/* Number (and parent) with the edit control on one line, so the
+            title below gets the full width of the card. */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+            <span className="font-mono">#{task.number}</span>
+            {parent && (
+              <>
+                <span aria-hidden>·</span>
+                <span>подзадача</span>
+                <button
+                  type="button"
+                  className="min-w-0 max-w-full truncate rounded text-foreground-secondary underline-offset-2 transition-colors hover:text-primary hover:underline"
+                  onClick={() => onSelect(parent.id)}
+                >
+                  <span className="font-mono">#{parent.number}</span> {parent.title}
+                </button>
+              </>
             )}
-            {task.assignee_id ? <PersonOrUnavailable data={data} id={task.assignee_id} className="min-w-0 break-words" /> : <span className="min-w-0 text-muted-foreground">Без исполнителя</span>}
-          </dd>
-          {timerLive && (
-            <>
-              <dt className="text-xs leading-6 text-muted-foreground">Сейчас работает</dt>
-              <dd className="flex min-w-0 flex-wrap items-center gap-x-2 leading-6 sm:col-span-3">
-                {workersOf(data, task.id).map((id, i) => <span key={id} className="min-w-0">{i > 0 && ", "}<PersonOrUnavailable data={data} id={id} className="break-words" /></span>)}
-                <LiveBadge />
-              </dd>
-            </>
-          )}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            className="h-8 w-8 shrink-0 rounded-full px-0 sm:w-auto sm:px-3"
+            aria-label={editing ? "Закрыть редактирование" : "Изменить задачу"}
+            aria-expanded={editing}
+            onClick={openEditor}
+          >
+            {editing ? <X className="h-4 w-4" /> : <Pencil className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{editing ? "Закрыть" : "Изменить"}</span>
+          </Button>
+        </div>
+        {/* Long titles (they can be whole sentences) step down one size. */}
+        <h2
+          className={`mt-2 break-words ${task.title.length > 80 ? "text-title-3" : "text-title-2"}`}
+        >
+          {task.title}
+        </h2>
+        {task.description && (
+          <p className="mt-3 whitespace-pre-wrap break-words text-reading text-foreground-secondary">
+            {task.description}
+          </p>
+        )}
+
+        {/* Properties: four quiet tiles and the people row. */}
+        <dl className="mt-5 grid grid-cols-2 gap-2 @2xl:grid-cols-4">
+          <Property label="Статус" icon={<StatusIcon status={task.status} className="scale-90" />}>
+            {STATUS_LABEL[task.status]}
+          </Property>
+          <Property
+            label="Приоритет"
+            icon={<Flag aria-hidden className="h-3.5 w-3.5" />}
+            className={
+              task.priority === "critical"
+                ? "text-destructive"
+                : task.priority === "high"
+                  ? "text-warning"
+                  : ""
+            }
+          >
+            {PRIORITY_LABEL[task.priority] ?? task.priority}
+          </Property>
+          <Property
+            label="Срок"
+            icon={<CalendarDays aria-hidden className="h-3.5 w-3.5" />}
+            className={
+              due?.overdue ? "text-destructive" : task.due_at ? "" : "text-muted-foreground"
+            }
+          >
+            {task.due_at
+              ? new Date(task.due_at).toLocaleString("ru-RU", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "Не задан"}
+          </Property>
+          <Property
+            label="Оценка"
+            icon={<Clock aria-hidden className="h-3.5 w-3.5" />}
+            className={est ? "tabular-nums" : "text-muted-foreground"}
+          >
+            {est ? formatDuration(est) : "Не задана"}
+          </Property>
         </dl>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 rounded-xl border border-border bg-background/40 px-3 py-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {assigneeProfile ? (
+              <ProfileAvatar
+                avatarUrl={assigneeProfile.avatar_url}
+                name={assigneeProfile.full_name || "Сотрудник"}
+                initials={initialsOf(assigneeProfile.full_name || "С")}
+                className="h-8 w-8 rounded-full"
+                fallbackClassName="text-[11px]"
+              />
+            ) : (
+              <span className="h-8 w-8 shrink-0 rounded-full border border-dashed border-border-strong" />
+            )}
+            <div className="min-w-0">
+              <div className="text-caption text-muted-foreground">Исполнитель</div>
+              <div className="text-callout font-medium">
+                {task.assignee_id ? (
+                  <PersonOrUnavailable data={data} id={task.assignee_id} className="break-words" />
+                ) : (
+                  <span className="text-muted-foreground">Без исполнителя</span>
+                )}
+              </div>
+            </div>
+          </div>
+          {timerLive && (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-callout">
+              <LiveBadge />
+              <span className="text-muted-foreground">Сейчас работает:</span>
+              {workersOf(data, task.id).map((id, i) => (
+                <span key={id} className="min-w-0">
+                  {i > 0 && ", "}
+                  <PersonOrUnavailable data={data} id={id} className="break-words" />
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
 
         <AnimatePresence initial={false}>
           {editing && (
             <motion.div key="edit" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden">
-              <div className="mt-4 space-y-2 rounded-lg border border-border bg-background/40 p-3">
-                <Input aria-label="Название задачи" value={titleDraft} onChange={(e) => setTitleDraft(e.target.value)} maxLength={200} />
-                <Textarea aria-label="Описание задачи" value={descriptionDraft} onChange={(e) => setDescriptionDraft(e.target.value)} rows={3} maxLength={5000} placeholder="Описание" />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <select aria-label="Приоритет" value={priorityDraft} onChange={(e) => setPriorityDraft(e.target.value as typeof task.priority)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
-                    {Object.entries(PRIORITY_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
-                  </select>
-                  <select aria-label="Исполнитель" value={assigneeDraft} onChange={(e) => setAssigneeDraft(e.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-sm">
-                    <option value="">Без исполнителя</option>
-                    {membersOf(data, task.project_id).map((member) => <option key={member.id} value={member.id}>{member.full_name || "Сотрудник"}</option>)}
-                  </select>
-                  <Input aria-label="Оценка времени в часах" type="number" min="0" step="0.25" value={estimateDraft} onChange={(e) => setEstimateDraft(e.target.value)} inputMode="decimal" placeholder="Оценка, ч" />
-                  <Input aria-label="Срок выполнения" type="datetime-local" value={dueDraft} onChange={(e) => setDueDraft(e.target.value)} />
+              <div className="mt-4 space-y-3 rounded-xl border border-border bg-background/50 p-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${formId}-title`}>Название</Label>
+                  <Input
+                    id={`${formId}-title`}
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    maxLength={200}
+                  />
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" disabled={patch.isPending || titleDraft.trim().length < 2} onClick={() => patch.mutate({
+                <div className="space-y-1.5">
+                  <Label htmlFor={`${formId}-description`}>Описание</Label>
+                  <Textarea
+                    id={`${formId}-description`}
+                    value={descriptionDraft}
+                    onChange={(e) => setDescriptionDraft(e.target.value)}
+                    rows={3}
+                    maxLength={5000}
+                    placeholder="Что нужно сделать, ссылки, детали"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${formId}-priority`}>Приоритет</Label>
+                    <NativeSelect
+                      id={`${formId}-priority`}
+                      icon={Flag}
+                      value={priorityDraft}
+                      onChange={(e) => setPriorityDraft(e.target.value as typeof task.priority)}
+                    >
+                      {Object.entries(PRIORITY_LABEL).map(([key, label]) => (
+                        <option key={key} value={key}>
+                          {label}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${formId}-assignee`}>Исполнитель</Label>
+                    <NativeSelect
+                      id={`${formId}-assignee`}
+                      icon={UserRound}
+                      value={assigneeDraft}
+                      onChange={(e) => setAssigneeDraft(e.target.value)}
+                    >
+                      <option value="">Без исполнителя</option>
+                      {membersOf(data, task.project_id).map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.full_name || "Сотрудник"}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${formId}-estimate`}>Оценка, ч</Label>
+                    <Input
+                      id={`${formId}-estimate`}
+                      type="number"
+                      min="0"
+                      step="0.25"
+                      value={estimateDraft}
+                      onChange={(e) => setEstimateDraft(e.target.value)}
+                      inputMode="decimal"
+                      placeholder="Например, 1,5"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor={`${formId}-due`}>Срок</Label>
+                    <Input
+                      id={`${formId}-due`}
+                      type="datetime-local"
+                      value={dueDraft}
+                      onChange={(e) => setDueDraft(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Отмена</Button>
+                  <Button size="sm" className="rounded-full px-4" disabled={patch.isPending || titleDraft.trim().length < 2} onClick={() => patch.mutate({
                     taskId: task.id,
                     title: titleDraft,
                     description: descriptionDraft || null,
@@ -1060,7 +1745,6 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
                     estimatedSeconds: Math.round((parseFloat(estimateDraft.replace(",", ".")) || 0) * 3600),
                     dueAt: dueDraft ? new Date(dueDraft).toISOString() : null,
                   })}>Сохранить</Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Отмена</Button>
                 </div>
               </div>
             </motion.div>
@@ -1068,148 +1752,267 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
         </AnimatePresence>
       </section>
 
-      {/* Timer + actions */}
-      <section className="px-6 py-5">
-        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-background/40 px-5 py-4">
-          <div>
-            <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-              Затрачено
-              {timerLive && <LiveBadge />}
-            </div>
-            <LiveSpent task={task} running={data.running}>
-              {(spent) => {
-                const over = est > 0 && spent > est;
-                return (
-                  <>
-                    <div className={`mt-1 font-mono text-4xl font-semibold tabular-nums tracking-tight transition-colors duration-300 ${over ? "text-destructive" : myRunning ? "text-primary" : timerLive ? "text-foreground" : "text-foreground/80"}`}>
-                      {formatDuration(spent)}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {est ? <>из {formatDuration(est)} по оценке{over && <span className="text-destructive"> · превышено</span>}</> : "Оценка не задана"}
-                    </div>
-                  </>
-                );
-              }}
-            </LiveSpent>
-          </div>
-          {/* Completed project: start/resume are not offered; say why instead of leaving a gap. */}
-          {projectDone && !myRunning && task.status !== "done" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/40 px-3 py-1 text-[11px] text-muted-foreground">
-              <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
-              Проект завершён — таймер недоступен
-            </span>
-          )}
-          {(actions.length > 0 || task.status === "in_progress" || task.status === "waiting") && (
-            <div className="flex w-full flex-wrap items-center gap-1 border-t border-border/60 pt-3 sm:w-auto sm:border-t-0 sm:pt-0">
-              {actions.map((x) => (
-                <motion.span key={x.a} whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
-                  <Button
-                    variant={x.primary ? "default" : "ghost"}
-                    size="sm"
-                    disabled={act.isPending}
-                    onClick={() => act.mutate({ action: x.a })}
+      {/* Work: timer, progress, actions, report and time intervals. */}
+      <section
+        aria-label="Работа"
+        className={`relative overflow-hidden rounded-card border bg-card p-5 sm:p-6 ${myRunning ? "luno-timer-live" : "border-border"}`}
+      >
+        <LiveSpent task={task} running={data.running}>
+          {(spent) => {
+            const over = est > 0 && spent > est;
+            const shown = displayedProgress(task, subtasks.length > 0, spent);
+            return (
+              <div className="relative flex items-center gap-5">
+                <ProgressRing
+                  value={shown.value}
+                  size={88}
+                  stroke={6}
+                  tone={shown.source === "done" ? "success" : "primary"}
+                >
+                  <span
+                    className={`text-title-3 tabular-nums ${shown.value === null ? "text-muted-foreground" : ""}`}
                   >
-                    {x.icon}
-                    {x.label}
-                  </Button>
-                </motion.span>
-              ))}
-              {(task.status === "in_progress" || task.status === "waiting") && (
-                <motion.span whileTap={{ scale: 0.97 }} transition={EASE_OUT}>
-                  <Button size="sm" variant={showReport ? "secondary" : "ghost"} aria-expanded={showReport} onClick={() => setShowReport((v) => !v)}>
-                    <CheckCircle2 className="h-4 w-4" />
-                    Завершить
-                  </Button>
-                </motion.span>
-              )}
-            </div>
-          )}
-        </div>
+                    {shown.value === null ? "—" : `${shown.value}%`}
+                  </span>
+                </ProgressRing>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-callout text-muted-foreground">
+                    Затрачено
+                    {timerLive && <LiveBadge />}
+                  </div>
+                  <RollingTime
+                    value={formatDuration(spent)}
+                    className={`mt-0.5 text-timer transition-colors duration-300 ${over ? "text-destructive" : myRunning ? "text-primary" : timerLive ? "text-foreground" : "text-foreground/85"}`}
+                  />
+                  <div className="mt-1 text-callout text-muted-foreground">
+                    {est ? (
+                      <>
+                        из {formatDuration(est)} по оценке
+                        {over && <span className="text-destructive"> · превышено</span>}
+                      </>
+                    ) : (
+                      "Оценка не задана"
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-caption text-muted-foreground">
+                    {PROGRESS_SOURCE[shown.value === null ? "none" : shown.source]}
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        </LiveSpent>
+
+        {/* Manual progress stays editable for leaf tasks; it is the shown value only without an estimate. */}
+        {!subtasks.length && task.status !== "done" && (
+          <div className="relative mt-4 flex items-center gap-3">
+            <span className="shrink-0 text-callout text-muted-foreground">Вручную</span>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              defaultValue={task.progress}
+              style={{ "--range-fill": `${manualValue}%` } as React.CSSProperties}
+              onInput={(e) => setManualDraft(Number(e.currentTarget.value))}
+              onMouseUp={(e) =>
+                patch.mutate({
+                  taskId: task.id,
+                  progress: Number((e.target as HTMLInputElement).value),
+                })
+              }
+              onKeyUp={(e) =>
+                patch.mutate({
+                  taskId: task.id,
+                  progress: Number((e.target as HTMLInputElement).value),
+                })
+              }
+              className="luno-range min-w-0 flex-1"
+              aria-label="Прогресс выполнения"
+            />
+            <span className="w-10 shrink-0 text-right text-callout tabular-nums text-foreground-secondary">
+              {manualValue}%
+            </span>
+          </div>
+        )}
+
+        {/* Completed project: start/resume are not offered; say why instead of leaving a gap. */}
+        {projectDone && !myRunning && task.status !== "done" && (
+          <p className="relative mt-4 inline-flex items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 py-1 text-caption text-foreground-secondary">
+            <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
+            Проект завершён — таймер недоступен
+          </p>
+        )}
+        {(actions.length > 0 || task.status === "in_progress" || task.status === "waiting") && (
+          <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+            {actions.map((x) => (
+              <Button
+                key={x.a}
+                variant={x.primary || x.a === "pause" ? "default" : "secondary"}
+                className="h-10 rounded-full px-4"
+                disabled={act.isPending}
+                onClick={() => act.mutate({ action: x.a })}
+              >
+                {x.icon}
+                {x.label}
+              </Button>
+            ))}
+            {(task.status === "in_progress" || task.status === "waiting") && (
+              <Button
+                variant="secondary"
+                className={`h-10 rounded-full px-4 ${showReport ? "ring-1 ring-primary/50" : ""}`}
+                aria-expanded={showReport}
+                onClick={() => setShowReport((v) => !v)}
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Завершить
+              </Button>
+            )}
+          </div>
+        )}
 
         <AnimatePresence initial={false}>
           {showReport && (
-            <motion.div key="report-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden">
-              <div className="mt-4 space-y-2 rounded-lg border border-border bg-background/40 p-3">
-                <div className="text-sm font-medium">Отчёт о выполнении</div>
-                <Textarea value={report} onChange={(e) => setReport(e.target.value)} placeholder="Что сделано, результат, ссылки" rows={4} />
-                <Button size="sm" disabled={report.trim().length < 3 || act.isPending} onClick={() => act.mutate({ action: "complete", report })}>
-                  Завершить с отчётом
-                </Button>
+            <motion.div
+              key="report-form"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={EASE_OUT}
+              className="relative overflow-hidden"
+            >
+              <div className="mt-4 space-y-3 rounded-xl border border-border bg-background/50 p-4">
+                <Label htmlFor={`${formId}-report`} className="text-body font-medium">
+                  Отчёт о выполнении
+                </Label>
+                <Textarea
+                  id={`${formId}-report`}
+                  value={report}
+                  onChange={(e) => setReport(e.target.value)}
+                  placeholder="Что сделано, результат, ссылки"
+                  rows={4}
+                />
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    className="rounded-full px-4"
+                    disabled={report.trim().length < 3 || act.isPending}
+                    onClick={() => act.mutate({ action: "complete", report })}
+                  >
+                    Завершить с отчётом
+                  </Button>
+                </div>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-      </section>
-
-      {/* Metadata + progress */}
-      <section className="px-6 py-5">
-        <div>
-          <LiveSpent task={task} running={data.running}>
-            {(spent) => {
-              const shown = displayedProgress(task, subtasks.length > 0, spent);
-              const label = shown.source === "subtasks" ? " · по подзадачам" : shown.source === "time" ? " · по времени" : "";
-              return (
-                <>
-                  <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-                    <span className="flex items-center gap-2 text-muted-foreground">Прогресс{label}{timerLive && <LiveBadge />}</span>
-                    <span className={shown.value === null ? "text-muted-foreground" : "font-medium tabular-nums"}>{shown.value === null ? "Оценка не задана" : `${shown.value}%`}</span>
-                  </div>
-                  <div className="h-[3px] w-full overflow-hidden rounded-full bg-secondary/70">
-                    <motion.div className="h-full rounded-full bg-primary/70" initial={false} animate={{ width: `${shown.value ?? 0}%` }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} />
-                  </div>
-                </>
-              );
-            }}
-          </LiveSpent>
-          {/* Manual progress stays editable for leaf tasks; it is the shown value only without an estimate. */}
-          {!subtasks.length && task.status !== "done" && (
-          <div className="mt-2 flex items-center gap-3">
-            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">Вручную {task.progress}%</span>
-            <div className="relative flex h-3 flex-1 items-center">
-              <div className="h-px w-full rounded-full bg-secondary/70" />
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                defaultValue={task.progress}
-                onMouseUp={(e) => patch.mutate({ taskId: task.id, progress: Number((e.target as HTMLInputElement).value) })}
-                onKeyUp={(e) => patch.mutate({ taskId: task.id, progress: Number((e.target as HTMLInputElement).value) })}
-                className="absolute inset-0 h-3 w-full cursor-pointer appearance-none bg-transparent opacity-70 transition-opacity hover:opacity-100 focus-visible:opacity-100 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border [&::-moz-range-thumb]:border-border [&::-moz-range-thumb]:bg-foreground [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-border [&::-webkit-slider-thumb]:bg-foreground"
-                aria-label="Прогресс выполнения"
-              />
-            </div>
-          </div>
-          )}
-        </div>
 
         <AnimatePresence initial={false}>
           {task.completion_report && (
-            <motion.div key="completion" {...fadeUp} transition={EASE_OUT} className="mt-5 rounded-lg border border-border bg-background/40 p-4">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                <CheckCircle2 className="h-3.5 w-3.5" />
+            <motion.div
+              key="completion"
+              {...fadeUp}
+              transition={EASE_OUT}
+              className="relative mt-5 rounded-xl border border-success/25 bg-success/[0.07] p-4"
+            >
+              <div className="mb-1.5 flex items-center gap-1.5 text-callout font-medium text-success">
+                <CheckCircle2 className="h-4 w-4" />
                 Отчёт при завершении
               </div>
-              <p className="whitespace-pre-wrap text-sm">{task.completion_report}</p>
+              <p className="whitespace-pre-wrap break-words text-body text-foreground">
+                {task.completion_report}
+              </p>
             </motion.div>
           )}
         </AnimatePresence>
+
+        {entries.length > 0 && (
+          <div className="relative mt-4 border-t border-border pt-3">
+            <button
+              type="button"
+              aria-expanded={showIntervals}
+              onClick={() => setShowIntervals((v) => !v)}
+              className="flex w-full items-center justify-between gap-3 rounded-lg py-1 text-callout text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Timer aria-hidden className="h-4 w-4" />
+                Интервалы времени
+                <span className="tabular-nums">{entries.length}</span>
+              </span>
+              <ChevronDown
+                aria-hidden
+                className={`h-4 w-4 transition-[rotate] duration-300 ease-(--ease-spring) ${showIntervals ? "rotate-180" : ""}`}
+              />
+            </button>
+            <AnimatePresence initial={false}>
+              {showIntervals && (
+                <motion.ul
+                  key="intervals"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={EASE_OUT}
+                  className="overflow-hidden"
+                >
+                  {entries.map((e) => (
+                    <li
+                      key={e.id}
+                      className="flex items-baseline justify-between gap-3 py-1.5 text-caption text-muted-foreground first:mt-2"
+                    >
+                      <span className="min-w-0">
+                        <PersonName data={data} id={e.user_id} /> ·{" "}
+                        {new Date(e.started_at).toLocaleString("ru-RU", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-foreground-secondary">
+                        {e.ended_at ? formatDuration(e.duration_seconds ?? 0) : "идёт…"}
+                      </span>
+                    </li>
+                  ))}
+                </motion.ul>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
       </section>
 
-      {/* Subtasks */}
-      <section className="px-6 py-5">
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Подзадачи · {subtasks.length}</h3>
+      {/* Structure: subtasks */}
+      <section
+        aria-label="Подзадачи"
+        className="rounded-card border border-border bg-card p-5 sm:p-6"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="flex items-baseline gap-2 text-title-3">
+            Подзадачи
+            <span className="text-body font-normal tabular-nums text-muted-foreground">
+              {subtasks.length}
+            </span>
+          </h3>
           {task.status !== "done" && !projectDone && (
-            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" aria-expanded={subtaskFormOpen} onClick={() => setSubtaskFormOpen((open) => !open)}>
-              <Plus className="h-3.5 w-3.5" />
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-8 rounded-full px-3"
+              aria-expanded={subtaskFormOpen}
+              onClick={() => setSubtaskFormOpen((open) => !open)}
+            >
+              <Plus
+                className={`h-4 w-4 transition-[rotate] duration-300 ease-(--ease-spring) ${subtaskFormOpen ? "rotate-45" : ""}`}
+              />
               Подзадача
             </Button>
           )}
         </div>
-        {subtasks.length === 0 && !subtaskFormOpen && <p className="text-xs text-muted-foreground">Подзадач пока нет.</p>}
+        {subtasks.length === 0 && !subtaskFormOpen && (
+          <p className="mt-2 text-callout text-muted-foreground">
+            Подзадач пока нет. С ними прогресс задачи считается автоматически.
+          </p>
+        )}
         {subtasks.length > 0 && (
-          <div className="divide-y divide-border/60 rounded-lg border border-border">
+          <div className="mt-3 divide-y divide-border overflow-hidden rounded-xl border border-border bg-background/40">
             <AnimatePresence initial={false}>
               {subtasks.map((st) => (
                 <motion.button
@@ -1219,12 +2022,22 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
                   transition={EASE_OUT}
                   onClick={() => onSelect(st.id)}
                   title={st.title}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-secondary/40"
+                  className="group/sub flex w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-white/[0.04]"
                 >
                   <StatusIcon status={st.status} />
-                  <span className="font-mono text-xs text-muted-foreground">#{st.number}</span>
-                  <span className={`flex-1 truncate ${st.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : ""}`}>{st.title}</span>
-                  <span className="text-[11px] text-muted-foreground">{STATUS_LABEL[st.status]}</span>
+                  <span className="font-mono text-caption text-muted-foreground">#{st.number}</span>
+                  <span
+                    className={`min-w-0 flex-1 truncate text-body ${st.status === "done" ? "text-muted-foreground line-through decoration-muted-foreground/40" : ""}`}
+                  >
+                    {st.title}
+                  </span>
+                  <span className="hidden text-caption text-muted-foreground sm:inline">
+                    {STATUS_LABEL[st.status]}
+                  </span>
+                  <ChevronRight
+                    aria-hidden
+                    className="h-4 w-4 shrink-0 text-muted-foreground transition-[translate,color] duration-200 group-hover/sub:translate-x-0.5 group-hover/sub:text-foreground"
+                  />
                 </motion.button>
               ))}
             </AnimatePresence>
@@ -1233,7 +2046,7 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
         <AnimatePresence initial={false}>
           {task.status !== "done" && !projectDone && subtaskFormOpen && (
             <motion.div key="subtask-form" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden">
-              <div className="mt-2">
+              <div className="mt-3">
                 <NewTask projectId={task.project_id} members={membersOf(data, task.project_id)} parentId={task.id} />
               </div>
             </motion.div>
@@ -1241,44 +2054,137 @@ function TaskDetailView({ task, data, onSelect }: TaskDetailProps) {
         </AnimatePresence>
       </section>
 
-      <Comments taskId={task.id} data={data} comments={activity.data?.comments ?? NO_COMMENTS} />
-
-      {/* History timeline */}
-      <section className="bg-background/25 px-6 py-6">
-        <h3 className="mb-4 flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><History className="h-3.5 w-3.5" /> История · {history.length}</h3>
-        {entries.length > 0 && (
-          <div className="mb-4 rounded-lg border border-border">
-            <div className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">Интервалы времени</div>
-            {entries.map((e) => (
-              <div key={e.id} className="flex justify-between px-3 py-1.5 text-xs text-muted-foreground">
-                <span><PersonName data={data} id={e.user_id} /> · {new Date(e.started_at).toLocaleString("ru-RU")}</span>
-                <span className="font-mono tabular-nums">{e.ended_at ? formatDuration(e.duration_seconds ?? 0) : "идёт…"}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <ol className="max-h-80 overflow-auto">
-          {history.map((h, index) => (
-            <motion.li
-              key={h.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ ...EASE_OUT, delay: Math.min(index, 8) * 0.025 }}
-              className="relative flex gap-3 pb-3 last:pb-0"
-            >
-              <span aria-hidden className="relative flex w-3 shrink-0 justify-center">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-muted-foreground/70" />
-                {index < history.length - 1 && <span className="absolute top-3.5 bottom-[-0.25rem] w-px bg-border" />}
-              </span>
-              <span className="min-w-0 text-xs leading-relaxed">
-                <span className="text-foreground/90">{describe(h, data)}</span>
-                <span className="block text-muted-foreground"><PersonName data={data} id={h.actor_id} /> · {new Date(h.created_at).toLocaleString("ru-RU")}</span>
-              </span>
-            </motion.li>
-          ))}
-          {history.length === 0 && <li className="text-xs text-muted-foreground">Пока нет событий.</li>}
-        </ol>
+      {/* Discussion: comments and history behind one segmented control. */}
+      <section
+        aria-label="Обсуждение"
+        className="rounded-card border border-border bg-card p-5 sm:p-6"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-title-3">Обсуждение</h3>
+          <Segmented
+            label="Раздел обсуждения"
+            pillId="discussion-pill"
+            value={discussion}
+            onChange={setDiscussion}
+            options={[
+              [
+                "comments",
+                <>
+                  Комментарии{" "}
+                  <span className="tabular-nums text-muted-foreground">{comments.length}</span>
+                </>,
+              ],
+              [
+                "history",
+                <>
+                  История{" "}
+                  <span className="tabular-nums text-muted-foreground">{history.length}</span>
+                </>,
+              ],
+            ]}
+          />
+        </div>
+        <AnimatePresence mode="wait" initial={false}>
+          {discussion === "comments" ? (
+            <motion.div key="comments" {...fadeUp} transition={EASE_OUT}>
+              <Comments taskId={task.id} data={data} comments={comments} />
+            </motion.div>
+          ) : (
+            <motion.div key="history" {...fadeUp} transition={EASE_OUT}>
+              <ol className="mt-5">
+                {visibleHistory.map((h, index) => (
+                  <motion.li
+                    key={h.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ ...EASE_OUT, delay: Math.min(index, 8) * 0.025 }}
+                    className="relative flex gap-3 pb-4 last:pb-0"
+                  >
+                    <span aria-hidden className="relative flex w-4 shrink-0 justify-center">
+                      <span
+                        className={`mt-1 h-2 w-2 rounded-full ring-4 ring-card ${historyDot(h.action)}`}
+                      />
+                      {index < visibleHistory.length - 1 && (
+                        <span className="absolute bottom-[-0.25rem] top-4 w-px bg-border" />
+                      )}
+                    </span>
+                    <span className="min-w-0 text-callout">
+                      <span className="text-foreground">{describe(h, data)}</span>
+                      <span className="mt-0.5 block text-caption text-muted-foreground">
+                        <PersonName data={data} id={h.actor_id} /> ·{" "}
+                        {new Date(h.created_at).toLocaleString("ru-RU", {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </span>
+                  </motion.li>
+                ))}
+                {history.length === 0 && (
+                  <li className="text-callout text-muted-foreground">Пока нет событий.</li>
+                )}
+              </ol>
+              {history.length > HISTORY_PREVIEW && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-3 h-8 rounded-full px-3 text-muted-foreground"
+                  onClick={() => setShowAllHistory((v) => !v)}
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-[rotate] duration-300 ease-(--ease-spring) ${showAllHistory ? "rotate-180" : ""}`}
+                  />
+                  {showAllHistory ? "Свернуть" : `Показать все · ${history.length}`}
+                </Button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </section>
+    </article>
+  );
+}
+
+/** Events shown before "Показать все" in the task history. */
+const HISTORY_PREVIEW = 6;
+
+const PROGRESS_SOURCE = {
+  done: "Прогресс · задача завершена",
+  subtasks: "Прогресс · по подзадачам",
+  time: "Прогресс · по времени",
+  manual: "Прогресс · вручную",
+  none: "Прогресс не задан",
+} as const;
+
+/** Colour of a history event's dot: creation and completion green, status and timer orange. */
+function historyDot(action: string) {
+  if (action === "created" || action === "completed_with_report") return "bg-success";
+  if (action === "status_changed" || action === "reopened" || action.startsWith("timer_"))
+    return "bg-primary";
+  return "bg-muted-foreground/70";
+}
+
+/** One property tile of the task header. `className` tints the value. */
+function Property({
+  label,
+  icon,
+  children,
+  className = "",
+}: {
+  label: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-border bg-background/40 px-3 py-2.5">
+      <dt className="text-caption text-muted-foreground">{label}</dt>
+      <dd
+        className={`mt-1 flex min-w-0 items-center gap-1.5 text-callout font-medium ${className}`}
+      >
+        {icon}
+        <span className="truncate">{children}</span>
+      </dd>
     </div>
   );
 }
@@ -1368,25 +2274,69 @@ function CommentsView({ taskId, data, comments }: CommentsProps) {
   const roots = useMemo(() => comments.filter((c) => !c.parent_comment_id), [comments]);
   const renderC = (c: Comment, depth: number): React.ReactNode => {
     const author = nameOf(data, c.author_id);
-    const vip = data.profiles.find((profile) => profile.id === c.author_id)?.is_vip;
+    const profile = data.profiles.find((item) => item.id === c.author_id);
     const replies = comments.filter((r) => r.parent_comment_id === c.id);
     return (
-      <motion.div key={c.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={EASE_OUT} className={depth > 0 ? "ml-3.5 border-l border-border/70 pl-4" : ""}>
-        <div className="flex gap-3 py-2.5">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-secondary text-[10px] font-semibold">{initialsOf(author)}</span>
+      <motion.div
+        key={c.id}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={EASE_OUT}
+        className={depth > 0 ? "ml-4 border-l border-border pl-4" : ""}
+      >
+        <div className="flex gap-3 py-3">
+          <ProfileAvatar
+            avatarUrl={profile?.avatar_url}
+            name={author}
+            initials={initialsOf(author)}
+            className={`${depth > 0 ? "h-7 w-7" : "h-8 w-8"} shrink-0 rounded-full`}
+            fallbackClassName="text-[10px]"
+          />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-x-2">
-              <EmployeeName name={author} isVip={vip} className="text-sm font-medium text-foreground" />
-              <span className="text-[11px] text-muted-foreground/70">{new Date(c.created_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}</span>
+              <EmployeeName
+                name={author}
+                isVip={profile?.is_vip}
+                className="text-callout font-semibold text-foreground"
+              />
+              <span className="text-caption text-muted-foreground">
+                {new Date(c.created_at).toLocaleString("ru-RU", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })}
+              </span>
             </div>
-            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">{c.body}</p>
-            <button type="button" className="mt-1 text-[11px] text-muted-foreground/70 transition-colors hover:text-foreground" onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}>Ответить</button>
+            <p className="mt-1 whitespace-pre-wrap break-words text-body text-foreground/90">
+              {c.body}
+            </p>
+            <button
+              type="button"
+              aria-expanded={replyTo === c.id}
+              className="mt-1.5 inline-flex items-center gap-1 rounded text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}
+            >
+              <Reply aria-hidden className="h-3.5 w-3.5" />
+              Ответить
+            </button>
             <AnimatePresence initial={false}>
               {replyTo === c.id && (
                 <motion.div key="reply" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={EASE_OUT} className="overflow-hidden">
-                  <div className="mt-2 flex gap-2">
-                    <Input value={reply} onChange={(e) => setReply(e.target.value)} className="h-8" placeholder="Ответ" />
-                    <Button size="sm" disabled={!reply.trim() || m.isPending} onClick={() => m.mutate({ body: reply, parent: c.id })}>Отправить</Button>
+                  <div className="mt-2 flex gap-2 p-px">
+                    <Input
+                      value={reply}
+                      onChange={(e) => setReply(e.target.value)}
+                      className="h-9"
+                      placeholder={`Ответ для ${shortName(author)}`}
+                      aria-label="Текст ответа"
+                    />
+                    <Button
+                      size="sm"
+                      className="h-9 shrink-0 rounded-full px-3.5"
+                      disabled={!reply.trim() || m.isPending}
+                      onClick={() => m.mutate({ body: reply, parent: c.id })}
+                    >
+                      Отправить
+                    </Button>
                   </div>
                 </motion.div>
               )}
@@ -1398,15 +2348,38 @@ function CommentsView({ taskId, data, comments }: CommentsProps) {
     );
   };
   return (
-    <section className="px-6 py-6">
-      <h3 className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground"><MessageSquare className="h-3.5 w-3.5" /> Комментарии · {comments.length}</h3>
-      <div className="mt-2">
-        <AnimatePresence initial={false}>{roots.map((c) => renderC(c, 0))}</AnimatePresence>
+    <div className="mt-3">
+      {roots.length > 0 ? (
+        <div className="divide-y divide-border">
+          <AnimatePresence initial={false}>{roots.map((c) => renderC(c, 0))}</AnimatePresence>
+        </div>
+      ) : (
+        <p className="py-3 text-callout text-muted-foreground">
+          Комментариев пока нет — начните обсуждение.
+        </p>
+      )}
+      {/* Composer: one field with the send button inside, like a message bar. */}
+      <div className="mt-3 rounded-2xl border border-input bg-field transition-[border-color,box-shadow] duration-150 focus-within:border-primary/70 focus-within:ring-[3px] focus-within:ring-primary/20 hover:border-border-strong">
+        <Textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={2}
+          placeholder="Написать комментарий"
+          aria-label="Текст комментария"
+          className="min-h-[4.5rem] resize-none border-0 bg-transparent px-3.5 pt-3 shadow-none hover:border-0 focus-visible:ring-0"
+        />
+        <div className="flex justify-end px-2 pb-2">
+          <Button
+            size="sm"
+            className="h-8 rounded-full px-3.5"
+            disabled={!body.trim() || m.isPending}
+            onClick={() => m.mutate({ body, parent: null })}
+          >
+            <ArrowUp className="h-4 w-4" />
+            Отправить
+          </Button>
+        </div>
       </div>
-      <div className="mt-3 flex gap-2">
-        <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={2} placeholder="Написать комментарий" />
-        <Button size="sm" disabled={!body.trim() || m.isPending} onClick={() => m.mutate({ body, parent: null })} className="self-end">Отправить</Button>
-      </div>
-    </section>
+    </div>
   );
 }
