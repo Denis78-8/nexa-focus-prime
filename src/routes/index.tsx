@@ -1223,7 +1223,7 @@ function KpiCard({
           <AnimatedValue value={kpi.value} />
         )}
       </div>
-      <div className="mt-1.5 line-clamp-2 text-caption text-muted-foreground">
+      <div className="mt-1.5 line-clamp-3 text-caption text-muted-foreground lg:line-clamp-2">
         {loading ? "\u00a0" : kpi.caption}
       </div>
     </div>

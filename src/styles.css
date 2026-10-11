@@ -614,6 +614,9 @@
   --eclipse-y: calc(var(--auth-eclipse) * 0.45);
   --eclipse-size: var(--auth-eclipse);
   --grid-strength: 0.45;
+  /* Phones: the squares sit just inside the rim, below the screen's top edge. */
+  --pixels-x: 72%;
+  --pixels-y: 9%;
 }
 @media (min-width: 1024px) {
   .luno-backdrop--auth {
@@ -622,6 +625,7 @@
     --eclipse-size: min(84vh, 54vw, 860px);
     --grid-strength: 0.6;
     --pixels-x: 1%;
+    --pixels-y: -2%;
     --pixels-flip: -1;
   }
 }

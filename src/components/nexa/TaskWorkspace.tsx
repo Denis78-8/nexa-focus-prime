@@ -336,9 +336,12 @@ function Workspace({
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {projectCompleted ? (
-                      <span className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-secondary/60 px-3 text-caption font-medium text-foreground-secondary">
+                      <span
+                        title={completedLabel(project)}
+                        className="inline-flex h-8 w-8 items-center justify-center gap-1.5 rounded-full border border-border bg-secondary/60 text-caption font-medium text-foreground-secondary sm:w-auto sm:px-3"
+                      >
                         <CheckCircle2 aria-hidden className="h-3.5 w-3.5" />
-                        {completedLabel(project)}
+                        <span className="sr-only sm:not-sr-only">{completedLabel(project)}</span>
                       </span>
                     ) : (
                       <Button

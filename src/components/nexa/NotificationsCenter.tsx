@@ -61,6 +61,17 @@ function typeMeta(type: string) {
   );
 }
 
+/**
+ * Server-written texts say "Level 4"; the interface says "уровень 4".
+ * Display only: stored notifications are not changed.
+ */
+function readableLevels(text: string) {
+  return text
+    .replace(/(^|\s)с Level (\d)/g, "$1с уровня $2")
+    .replace(/(^|\s)до Level (\d)/g, "$1до уровня $2")
+    .replace(/\bLevel (\d)/g, "уровень $1");
+}
+
 function isToday(value: string) {
   const date = new Date(value);
   const now = new Date();
@@ -111,14 +122,16 @@ function NotificationRow({ item, onOpen }: { item: AppNotification; onOpen: (ite
           <span
             className={`min-w-0 truncate text-body ${unread ? "font-semibold text-foreground" : "font-medium text-foreground/85"}`}
           >
-            {item.title}
+            {readableLevels(item.title)}
           </span>
           <span className="shrink-0 text-caption text-muted-foreground">
             {timeLabel(item.created_at)}
           </span>
         </span>
         {item.body && (
-          <span className="mt-1 block text-callout text-muted-foreground">{item.body}</span>
+          <span className="mt-1 block text-callout text-muted-foreground">
+            {readableLevels(item.body)}
+          </span>
         )}
         <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
           <span>{meta.label}</span>

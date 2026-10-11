@@ -388,7 +388,7 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
       {data.capabilities.systemManage && (
         <section aria-label="Состояние системы">
           {status ? (
-            <dl className="grid gap-3 sm:grid-cols-3">
+            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
               <StatusTile icon={Database} label="База данных">
                 <span className="inline-flex items-center gap-2">
                   <span
@@ -402,7 +402,7 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
               <StatusTile icon={Tag} label="Версия">
                 {status.version}
               </StatusTile>
-              <StatusTile icon={Clock} label="Проверено">
+              <StatusTile icon={Clock} label="Проверено" className="col-span-2 sm:col-span-1">
                 {new Date(status.checkedAt).toLocaleString("ru-RU")}
               </StatusTile>
             </dl>
@@ -1245,20 +1245,25 @@ function SwitchField({
   );
 }
 
+/** One fact of the system status; on phones the icon is dropped to keep tiles compact. */
 function StatusTile({
   icon: Icon,
   label,
   children,
+  className = "",
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-card border border-border bg-card px-4 py-3.5">
+    <div
+      className={`flex min-w-0 items-center gap-3 rounded-card border border-border bg-card px-3.5 py-3 sm:px-4 sm:py-3.5 ${className}`}
+    >
       <span
         aria-hidden
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary/70 text-foreground-secondary"
+        className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-secondary/70 text-foreground-secondary sm:flex"
       >
         <Icon className="h-4 w-4" />
       </span>
