@@ -46,6 +46,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ENTER } from "@/lib/motion";
+import { APP_VERSION } from "@/lib/release";
 import { getAdminData, getSystemStatus, reserveCorporateMailbox, suggestCorporateEmail, updateEmployee, updateEmployeePassword, updatePermissionMatrix } from "@/lib/admin.functions";
 
 type Employee = { id: string; full_name: string; email: string | null; position: string | null; department: string | null; phone: string | null; location: string | null; access_level: number; is_vip: boolean; is_active: boolean; mailbox_status: string; invitation_status: string };
@@ -399,8 +400,9 @@ export function AdminPanel({ onEmployeeSaved }: { onEmployeeSaved?: (userId: str
                   </span>
                 </span>
               </StatusTile>
+              {/* The app version from src/lib/release.ts — the same as in "Что нового". */}
               <StatusTile icon={Tag} label="Версия">
-                {status.version}
+                {APP_VERSION}
               </StatusTile>
               <StatusTile icon={Clock} label="Проверено" className="col-span-2 sm:col-span-1">
                 {new Date(status.checkedAt).toLocaleString("ru-RU")}

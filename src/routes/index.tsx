@@ -37,6 +37,7 @@ import { getWorkspace } from "@/lib/tasks.functions";
 import { formatDuration } from "@/lib/nexa-session";
 import { BrandLogo } from "@/components/nexa/BrandLogo";
 import { StatusScreen } from "@/components/nexa/StatusScreen";
+import { WhatsNewDialog } from "@/components/nexa/WhatsNewDialog";
 import { DesktopNav, MobileTabBar, type NavItem } from "@/components/nexa/AppNav";
 
 // Heavy tabs load on first open, not with the initial page.
@@ -777,6 +778,9 @@ function NexaPrototype() {
           <span>Рабочее пространство команды</span>
         </div>
       </footer>
+
+      {/* Release notes of the current version, once per user and version. */}
+      <WhatsNewDialog userId={session.user.id} />
 
       <MobileTabBar
         primary={mobilePrimary}
